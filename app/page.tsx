@@ -3,6 +3,7 @@
 import {
   ChangeEvent,
   FormEvent,
+  KeyboardEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -16,7 +17,10 @@ import {
   MAX_STORED_IMAGE_DATA_URL_LENGTH,
   TIMELINE_PAGE_SIZE,
 } from "@/lib/feelog/constants";
-import { fileToUploadedImage } from "@/lib/feelog/image-processing";
+import {
+  fileToAvatarDataUrl,
+  fileToUploadedImage,
+} from "@/lib/feelog/image-processing";
 import { loadLocalPosts, saveLocalPosts } from "@/lib/feelog/local-post-store";
 import {
   buildExportText,
@@ -28,6 +32,14 @@ import {
   getExportPosts,
   updatePostBody,
 } from "@/lib/feelog/post-model";
+import {
+  DEFAULT_USER_PROFILE,
+  getProfileDisplayName,
+  getProfileHandle,
+  loadUserProfile,
+  saveUserProfile,
+  type UserProfile,
+} from "@/lib/feelog/profile-store";
 import { initialPosts } from "@/lib/feelog/seed-data";
 import {
   createSupabasePost,
@@ -46,6 +58,7 @@ const PINK = "#f8a9c8";
 const PINK_HOVER = "#f48bb5";
 const isSupabaseConfigured = hasSupabaseBrowserConfig();
 const isDevelopment = process.env.NODE_ENV !== "production";
+type ToolTab = "profile" | "search" | "export";
 
 export default function Home() {
   const [posts, setPosts] = useState<Post[]>(
@@ -57,6 +70,9 @@ export default function Home() {
   const [remoteExportPosts, setRemoteExportPosts] = useState<Post[]>([]);
   const [body, setBody] = useState("");
   const [draftImage, setDraftImage] = useState<DraftImage>();
+  const [profile, setProfile] = useState<UserProfile>(DEFAULT_USER_PROFILE);
+  const [profileReady, setProfileReady] = useState(false);
+  const [profileStatus, setProfileStatus] = useState("");
   const [query, setQuery] = useState("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -92,6 +108,20 @@ export default function Home() {
       window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setProfile(loadUserProfile());
+      setProfileReady(true);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!profileReady) return;
+    saveUserProfile(profile);
+  }, [profile, profileReady]);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -492,6 +522,54 @@ export default function Home() {
     setImageStatus("");
   }
 
+  function updateProfileDisplayName(value: string) {
+    setProfile((currentProfile) => ({
+      ...currentProfile,
+      displayName: value.slice(0, 40),
+    }));
+    setProfileStatus("");
+  }
+
+  function updateProfileHandle(value: string) {
+    setProfile((currentProfile) => ({
+      ...currentProfile,
+      userHandle: value.replace(/^@+/, "").replace(/\s+/g, "_").slice(0, 32),
+    }));
+    setProfileStatus("");
+  }
+
+  async function handleProfileAvatarChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setProfileStatus("画像ファイルを選んでください");
+      return;
+    }
+
+    setProfileStatus("プロフィール画像を準備中");
+
+    try {
+      const avatarDataUrl = await fileToAvatarDataUrl(file);
+      setProfile((currentProfile) => ({
+        ...currentProfile,
+        avatarDataUrl,
+      }));
+      setProfileStatus("プロフィール画像を変更しました");
+    } catch {
+      setProfileStatus("プロフィール画像を読み込めませんでした");
+    }
+  }
+
+  function clearProfileAvatar() {
+    setProfile((currentProfile) => ({
+      ...currentProfile,
+      avatarDataUrl: undefined,
+    }));
+    setProfileStatus("プロフィール画像を解除しました");
+  }
+
   function startEditing(post: Post) {
     setEditingId(post.id);
     setEditingBody(post.body);
@@ -664,21 +742,28 @@ export default function Home() {
             onClearImage={clearDraftImage}
             onImageFileChange={handleImageFileChange}
             onSubmit={handleSubmit}
+            profile={profile}
             status={imageStatus}
           />
 
           <div className="border-b border-neutral-200 xl:hidden">
-            <ToolsPanel
-              copyState={copyState}
-              exportFromDate={exportFromDate}
-              exportText={exportText}
-              exportToDate={exportToDate}
-              fromDate={fromDate}
-              idPrefix="mobile"
-              onCopy={copyExportText}
-              query={query}
-              resultCount={displayedTotal}
-              setExportFromDate={setExportFromDate}
+              <ToolsPanel
+                copyState={copyState}
+                exportFromDate={exportFromDate}
+                exportText={exportText}
+                exportToDate={exportToDate}
+                fromDate={fromDate}
+                idPrefix="mobile"
+                onCopy={copyExportText}
+                onProfileAvatarChange={handleProfileAvatarChange}
+                onProfileAvatarClear={clearProfileAvatar}
+                onProfileDisplayNameChange={updateProfileDisplayName}
+                onProfileHandleChange={updateProfileHandle}
+                profile={profile}
+                profileStatus={profileStatus}
+                query={query}
+                resultCount={displayedTotal}
+                setExportFromDate={setExportFromDate}
               setExportToDate={setExportToDate}
               setFromDate={handleFromDateChange}
               setQuery={handleQueryChange}
@@ -706,6 +791,7 @@ export default function Home() {
                     onEditingBodyChange={setEditingBody}
                     onSaveEdit={() => saveEditing(post.id)}
                     post={post}
+                    profile={profile}
                   />
                 ))}
                 <div
@@ -747,16 +833,22 @@ export default function Home() {
 
         <aside className="hidden xl:block">
           <div className="sticky top-0 max-h-screen overflow-y-auto px-5 py-3">
-            <ToolsPanel
-              copyState={copyState}
-              exportFromDate={exportFromDate}
-              exportText={exportText}
-              exportToDate={exportToDate}
-              fromDate={fromDate}
-              idPrefix="desktop"
-              onCopy={copyExportText}
-              query={query}
-              resultCount={displayedTotal}
+              <ToolsPanel
+                copyState={copyState}
+                exportFromDate={exportFromDate}
+                exportText={exportText}
+                exportToDate={exportToDate}
+                fromDate={fromDate}
+                idPrefix="desktop"
+                onCopy={copyExportText}
+                onProfileAvatarChange={handleProfileAvatarChange}
+                onProfileAvatarClear={clearProfileAvatar}
+                onProfileDisplayNameChange={updateProfileDisplayName}
+                onProfileHandleChange={updateProfileHandle}
+                profile={profile}
+                profileStatus={profileStatus}
+                query={query}
+                resultCount={displayedTotal}
               setExportFromDate={setExportFromDate}
               setExportToDate={setExportToDate}
               setFromDate={handleFromDateChange}
@@ -895,7 +987,7 @@ function AppRail() {
           </a>
           <a
             className="flex h-12 items-center gap-4 rounded-full px-3 transition-colors hover:bg-pink-50 xl:hidden"
-            href="#mobile-search"
+            href="#mobile-tools"
           >
             <span aria-hidden="true" className="text-xl">
               ⌕
@@ -904,7 +996,7 @@ function AppRail() {
           </a>
           <a
             className="hidden h-12 items-center gap-4 rounded-full px-3 transition-colors hover:bg-pink-50 xl:flex"
-            href="#desktop-search"
+            href="#desktop-tools"
           >
             <span aria-hidden="true" className="text-xl">
               ⌕
@@ -913,7 +1005,7 @@ function AppRail() {
           </a>
           <a
             className="flex h-12 items-center gap-4 rounded-full px-3 transition-colors hover:bg-pink-50 xl:hidden"
-            href="#mobile-export"
+            href="#mobile-tools"
           >
             <span aria-hidden="true" className="text-xl">
               ⇪
@@ -922,7 +1014,7 @@ function AppRail() {
           </a>
           <a
             className="hidden h-12 items-center gap-4 rounded-full px-3 transition-colors hover:bg-pink-50 xl:flex"
-            href="#desktop-export"
+            href="#desktop-tools"
           >
             <span aria-hidden="true" className="text-xl">
               ⇪
@@ -947,6 +1039,7 @@ function Composer({
   onClearImage,
   onImageFileChange,
   onSubmit,
+  profile,
   status,
 }: {
   body: string;
@@ -956,19 +1049,36 @@ function Composer({
   onClearImage: () => void;
   onImageFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  profile: UserProfile;
   status: string;
 }) {
+  const displayName = getProfileDisplayName(profile);
+  const userHandle = getProfileHandle(profile);
+
+  function handleTextareaKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter") return;
+    if (!body.trim() || isPostDisabled) return;
+
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }
+
   return (
     <form
       className="sticky top-[53px] z-20 border-b border-neutral-200 bg-white/95 px-4 pt-3 backdrop-blur-md"
       onSubmit={onSubmit}
     >
       <div className="flex gap-3">
-        <Avatar />
+        <Avatar profile={profile} />
         <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1 text-[14px] leading-5">
+            <span className="truncate font-bold text-neutral-950">{displayName}</span>
+            <span className="shrink-0 text-neutral-500">@{userHandle}</span>
+          </div>
           <textarea
-            className="min-h-24 w-full resize-none bg-transparent pt-2 text-[20px] leading-7 text-neutral-950 outline-none placeholder:text-neutral-500"
+            className="min-h-24 w-full resize-none bg-transparent pt-1 text-[20px] leading-7 text-neutral-950 outline-none placeholder:text-neutral-500"
             onChange={(event) => onBodyChange(event.target.value)}
+            onKeyDown={handleTextareaKeyDown}
             placeholder="いまどう思った？"
             value={body}
           />
@@ -1012,9 +1122,8 @@ function Composer({
               ) : null}
             </div>
             <button
-              className="h-9 shrink-0 rounded-full px-5 text-[15px] font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-9 shrink-0 rounded-full bg-[#f8a9c8] px-5 text-[15px] font-bold text-white transition-colors hover:bg-[#f48bb5] disabled:cursor-not-allowed disabled:bg-[#f5b8cf] disabled:opacity-50 disabled:hover:bg-[#f5b8cf]"
               disabled={!body.trim() || isPostDisabled}
-              style={{ backgroundColor: body.trim() && !isPostDisabled ? PINK : "#f5b8cf" }}
               type="submit"
             >
               投稿
@@ -1036,6 +1145,7 @@ function PostItem({
   onEditingBodyChange,
   onSaveEdit,
   post,
+  profile,
 }: {
   editingBody: string;
   editingId: string | null;
@@ -1046,25 +1156,25 @@ function PostItem({
   onEditingBodyChange: (value: string) => void;
   onSaveEdit: () => void;
   post: Post;
+  profile: UserProfile;
 }) {
   const isEditing = editingId === post.id;
+  const displayName = getProfileDisplayName(profile);
+  const userHandle = getProfileHandle(profile);
 
   return (
     <article className="border-b border-neutral-200 px-4 py-3 transition-colors hover:bg-neutral-50/70">
       <div className="flex gap-3">
-        <Avatar compact />
+        <Avatar compact profile={profile} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 text-[15px] leading-5">
-              <span className="font-bold text-neutral-950">me</span>
-              <span className="ml-2 text-neutral-500">@feel</span>
+              <span className="font-bold text-neutral-950">{displayName}</span>
+              <span className="ml-2 text-neutral-500">@{userHandle}</span>
               <span className="mx-1 text-neutral-500">·</span>
               <time className="text-neutral-500" dateTime={post.createdAt}>
                 {formatPostTime(post.createdAt)}
               </time>
-              {post.updatedAt ? (
-                <span className="ml-2 text-[13px] text-neutral-500">編集済み</span>
-              ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1 text-[13px]">
               <button
@@ -1146,6 +1256,12 @@ function ToolsPanel({
   fromDate,
   idPrefix,
   onCopy,
+  onProfileAvatarChange,
+  onProfileAvatarClear,
+  onProfileDisplayNameChange,
+  onProfileHandleChange,
+  profile,
+  profileStatus,
   query,
   resultCount,
   setExportFromDate,
@@ -1162,6 +1278,12 @@ function ToolsPanel({
   fromDate: string;
   idPrefix: string;
   onCopy: () => void;
+  onProfileAvatarChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onProfileAvatarClear: () => void;
+  onProfileDisplayNameChange: (value: string) => void;
+  onProfileHandleChange: (value: string) => void;
+  profile: UserProfile;
+  profileStatus: string;
   query: string;
   resultCount: number;
   setExportFromDate: (value: string) => void;
@@ -1171,95 +1293,257 @@ function ToolsPanel({
   setToDate: (value: string) => void;
   toDate: string;
 }) {
+  const [activeTab, setActiveTab] = useState<ToolTab | null>(null);
   const copyLabel =
     copyState === "copied"
       ? "コピー済み"
       : copyState === "failed"
         ? "失敗"
         : "コピー";
+  const tabs: { id: ToolTab; label: string }[] = [
+    { id: "profile", label: "プロフィール" },
+    { id: "search", label: "検索" },
+    { id: "export", label: "AI出力" },
+  ];
 
   return (
-    <div className="space-y-4 px-4 py-4 xl:px-0 xl:py-0">
-      <section aria-labelledby={`${idPrefix}-search-title`} id={`${idPrefix}-search`}>
-        <h2
-          className="mb-3 text-[20px] font-extrabold tracking-normal"
-          id={`${idPrefix}-search-title`}
-        >
-          検索
-        </h2>
-        <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
-          <label className="sr-only" htmlFor={`${idPrefix}-keyword`}>
-            キーワード
-          </label>
-          <input
-            className="h-11 w-full rounded-full border border-transparent bg-white px-4 text-[15px] outline-none transition focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
-            id={`${idPrefix}-keyword`}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="検索"
-            type="search"
-            value={query}
-          />
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <DateField
-              id={`${idPrefix}-from`}
-              label="開始日"
-              onChange={setFromDate}
-              value={fromDate}
-            />
-            <DateField
-              id={`${idPrefix}-to`}
-              label="終了日"
-              onChange={setToDate}
-              value={toDate}
-            />
-          </div>
-          <p className="mt-3 text-[13px] font-medium text-neutral-500">
-            {resultCount}件
-          </p>
-        </div>
-      </section>
+    <div className="px-4 py-3 xl:px-0 xl:py-0" id={`${idPrefix}-tools`}>
+      <div
+        aria-label="詳細パネル"
+        className="grid grid-cols-3 gap-1 rounded-full bg-neutral-100 p-1"
+        role="tablist"
+      >
+        {tabs.map((tab) => {
+          const isActive = activeTab === tab.id;
 
-      <section aria-labelledby={`${idPrefix}-export-title`} id={`${idPrefix}-export`}>
-        <div className="mb-3 flex items-center justify-between">
+          return (
+            <button
+              aria-controls={`${idPrefix}-${tab.id}`}
+              aria-selected={isActive}
+              className={`h-9 rounded-full px-2 text-[13px] font-bold transition-colors ${
+                isActive
+                  ? "bg-white text-neutral-950 shadow-sm"
+                  : "text-neutral-500 hover:bg-white/70 hover:text-neutral-900"
+              }`}
+              key={tab.id}
+              onClick={() => setActiveTab((currentTab) => (currentTab === tab.id ? null : tab.id))}
+              role="tab"
+              type="button"
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeTab === "profile" ? (
+        <ProfilePanel
+          idPrefix={idPrefix}
+          onAvatarChange={onProfileAvatarChange}
+          onAvatarClear={onProfileAvatarClear}
+          onDisplayNameChange={onProfileDisplayNameChange}
+          onHandleChange={onProfileHandleChange}
+          profile={profile}
+          status={profileStatus}
+        />
+      ) : null}
+
+      {activeTab === "search" ? (
+        <section
+          aria-labelledby={`${idPrefix}-search-title`}
+          className="mt-4"
+          id={`${idPrefix}-search`}
+        >
           <h2
-            className="text-[20px] font-extrabold tracking-normal"
-            id={`${idPrefix}-export-title`}
+            className="mb-3 text-[20px] font-extrabold tracking-normal"
+            id={`${idPrefix}-search-title`}
           >
-            AI出力
+            検索
           </h2>
-          <button
-            className="h-9 rounded-full px-4 text-[14px] font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!exportText}
-            onClick={onCopy}
-            style={{ backgroundColor: exportText ? PINK : "#f5b8cf" }}
-            type="button"
-          >
-            {copyLabel}
-          </button>
-        </div>
-        <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
-          <div className="grid grid-cols-2 gap-2">
-            <DateField
-              id={`${idPrefix}-export-from`}
-              label="開始日"
-              onChange={setExportFromDate}
-              value={exportFromDate}
+          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
+            <label className="sr-only" htmlFor={`${idPrefix}-keyword`}>
+              キーワード
+            </label>
+            <input
+              className="h-11 w-full rounded-full border border-transparent bg-white px-4 text-[15px] outline-none transition focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
+              id={`${idPrefix}-keyword`}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="検索"
+              type="search"
+              value={query}
             />
-            <DateField
-              id={`${idPrefix}-export-to`}
-              label="終了日"
-              onChange={setExportToDate}
-              value={exportToDate}
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <DateField
+                id={`${idPrefix}-from`}
+                label="開始日"
+                onChange={setFromDate}
+                value={fromDate}
+              />
+              <DateField
+                id={`${idPrefix}-to`}
+                label="終了日"
+                onChange={setToDate}
+                value={toDate}
+              />
+            </div>
+            <p className="mt-3 text-[13px] font-medium text-neutral-500">
+              {resultCount}件
+            </p>
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "export" ? (
+        <section
+          aria-labelledby={`${idPrefix}-export-title`}
+          className="mt-4"
+          id={`${idPrefix}-export`}
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <h2
+              className="text-[20px] font-extrabold tracking-normal"
+              id={`${idPrefix}-export-title`}
+            >
+              AI出力
+            </h2>
+            <button
+              className="h-9 rounded-full bg-[#f8a9c8] px-4 text-[14px] font-bold text-white transition-colors hover:bg-[#f48bb5] disabled:cursor-not-allowed disabled:bg-[#f5b8cf] disabled:opacity-50 disabled:hover:bg-[#f5b8cf]"
+              disabled={!exportText}
+              onClick={onCopy}
+              type="button"
+            >
+              {copyLabel}
+            </button>
+          </div>
+          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
+            <div className="grid grid-cols-2 gap-2">
+              <DateField
+                id={`${idPrefix}-export-from`}
+                label="開始日"
+                onChange={setExportFromDate}
+                value={exportFromDate}
+              />
+              <DateField
+                id={`${idPrefix}-export-to`}
+                label="終了日"
+                onChange={setExportToDate}
+                value={exportToDate}
+              />
+            </div>
+            <textarea
+              className="mt-3 min-h-44 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 font-mono text-[12px] leading-5 text-neutral-800 outline-none focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
+              readOnly
+              value={exportText}
             />
           </div>
-          <textarea
-            className="mt-3 min-h-44 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 font-mono text-[12px] leading-5 text-neutral-800 outline-none focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
-            readOnly
-            value={exportText}
-          />
-        </div>
-      </section>
+        </section>
+      ) : null}
     </div>
+  );
+}
+
+function ProfilePanel({
+  idPrefix,
+  onAvatarChange,
+  onAvatarClear,
+  onDisplayNameChange,
+  onHandleChange,
+  profile,
+  status,
+}: {
+  idPrefix: string;
+  onAvatarChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onAvatarClear: () => void;
+  onDisplayNameChange: (value: string) => void;
+  onHandleChange: (value: string) => void;
+  profile: UserProfile;
+  status: string;
+}) {
+  const displayName = getProfileDisplayName(profile);
+  const userHandle = getProfileHandle(profile);
+
+  return (
+    <section
+      aria-labelledby={`${idPrefix}-profile-title`}
+      className="mt-4"
+      id={`${idPrefix}-profile`}
+    >
+      <h2
+        className="mb-3 text-[20px] font-extrabold tracking-normal"
+        id={`${idPrefix}-profile-title`}
+      >
+        プロフィール
+      </h2>
+      <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
+        <div className="flex items-center gap-3">
+          <Avatar profile={profile} />
+          <div className="min-w-0">
+            <p className="truncate text-[15px] font-bold leading-5 text-neutral-950">
+              {displayName}
+            </p>
+            <p className="truncate text-[13px] leading-5 text-neutral-500">
+              @{userHandle}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <label className="block" htmlFor={`${idPrefix}-display-name`}>
+            <span className="mb-1 block text-[12px] font-semibold text-neutral-500">
+              表示名
+            </span>
+            <input
+              className="h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-[14px] outline-none transition focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
+              id={`${idPrefix}-display-name`}
+              onChange={(event) => onDisplayNameChange(event.target.value)}
+              value={profile.displayName}
+            />
+          </label>
+
+          <label className="block" htmlFor={`${idPrefix}-user-handle`}>
+            <span className="mb-1 block text-[12px] font-semibold text-neutral-500">
+              ユーザーID
+            </span>
+            <div className="flex h-10 items-center overflow-hidden rounded-xl border border-neutral-200 bg-white focus-within:border-pink-200 focus-within:ring-2 focus-within:ring-pink-100">
+              <span className="pl-3 text-[14px] font-semibold text-neutral-400">@</span>
+              <input
+                className="h-full min-w-0 flex-1 bg-transparent px-1 pr-3 text-[14px] outline-none"
+                id={`${idPrefix}-user-handle`}
+                onChange={(event) => onHandleChange(event.target.value)}
+                value={profile.userHandle}
+              />
+            </div>
+          </label>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <label
+            className="flex h-9 cursor-pointer items-center rounded-full bg-white px-3 text-[13px] font-bold text-neutral-700 transition-colors hover:bg-pink-50"
+            style={{ color: PINK_HOVER }}
+          >
+            画像を選ぶ
+            <input
+              accept="image/*"
+              className="sr-only"
+              onChange={onAvatarChange}
+              type="file"
+            />
+          </label>
+          {profile.avatarDataUrl ? (
+            <button
+              className="h-9 rounded-full px-3 text-[13px] font-semibold text-neutral-500 transition-colors hover:bg-neutral-100"
+              onClick={onAvatarClear}
+              type="button"
+            >
+              解除
+            </button>
+          ) : null}
+          {status ? (
+            <span className="text-[12px] font-medium text-neutral-500">{status}</span>
+          ) : null}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1297,7 +1581,7 @@ function PostImagePreview({ image }: { image: PostImage }) {
     return (
       <div
         aria-label={image.label}
-        className="aspect-[16/10] overflow-hidden rounded-2xl border border-neutral-200 bg-center bg-cover"
+        className="aspect-[16/9] w-full max-w-[420px] overflow-hidden rounded-2xl border border-neutral-200 bg-center bg-cover"
         role="img"
         style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}
       />
@@ -1307,7 +1591,7 @@ function PostImagePreview({ image }: { image: PostImage }) {
   return (
     <div
       aria-label={`${image.label}の画像`}
-      className="relative aspect-[16/10] overflow-hidden rounded-2xl border border-neutral-200"
+      className="relative aspect-[16/9] w-full max-w-[420px] overflow-hidden rounded-2xl border border-neutral-200"
       role="img"
       style={{ background: image.gradient }}
     >
@@ -1320,12 +1604,24 @@ function PostImagePreview({ image }: { image: PostImage }) {
   );
 }
 
-function Avatar({ compact = false }: { compact?: boolean }) {
+function Avatar({ compact = false, profile }: { compact?: boolean; profile: UserProfile }) {
+  const sizeClass = compact
+    ? "h-10 w-10 text-[17px] leading-10"
+    : "h-11 w-11 text-[18px] leading-[44px]";
+
+  if (profile.avatarDataUrl) {
+    return (
+      <div
+        aria-hidden="true"
+        className={`shrink-0 rounded-full border border-pink-100 bg-cover bg-center ${sizeClass}`}
+        style={{ backgroundImage: `url(${JSON.stringify(profile.avatarDataUrl)})` }}
+      />
+    );
+  }
+
   return (
     <div
-      className={`shrink-0 rounded-full bg-pink-100 text-center font-black text-pink-500 ${
-        compact ? "h-10 w-10 text-[17px] leading-10" : "h-11 w-11 text-[18px] leading-[44px]"
-      }`}
+      className={`shrink-0 rounded-full bg-pink-100 text-center font-black text-pink-500 ${sizeClass}`}
     >
       f
     </div>
