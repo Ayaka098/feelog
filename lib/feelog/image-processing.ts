@@ -27,23 +27,49 @@ export async function fileToUploadedImage(file: File): Promise<UploadedImage> {
     const dataUrl = webpDataUrl.startsWith("data:image/webp")
       ? webpDataUrl
       : canvas.toDataURL("image/jpeg", 0.84);
+    const blob = dataUrlToBlob(dataUrl);
 
     return {
       kind: "uploaded",
       label: file.name || "添付画像",
       dataUrl,
-      mimeType: dataUrl.slice(5, dataUrl.indexOf(";")) || file.type,
-      size: dataUrl.length,
+      mimeType: blob.type || file.type || "image/*",
+      size: blob.size,
     };
   } catch {
+    const blob = dataUrlToBlob(originalDataUrl);
+
     return {
       kind: "uploaded",
       label: file.name || "添付画像",
       dataUrl: originalDataUrl,
-      mimeType: file.type || "image/*",
-      size: originalDataUrl.length,
+      mimeType: blob.type || file.type || "image/*",
+      size: blob.size || file.size,
     };
   }
+}
+
+export function uploadedImageToBlob(image: UploadedImage) {
+  return dataUrlToBlob(image.dataUrl);
+}
+
+export function dataUrlToBlob(dataUrl: string) {
+  const separatorIndex = dataUrl.indexOf(",");
+  if (!dataUrl.startsWith("data:") || separatorIndex < 0) {
+    throw new Error("画像データを変換できませんでした");
+  }
+
+  const header = dataUrl.slice(0, separatorIndex);
+  const body = dataUrl.slice(separatorIndex + 1);
+  const mimeType = header.slice(5).split(";")[0] || "application/octet-stream";
+  const decoded = header.includes(";base64") ? atob(body) : decodeURIComponent(body);
+  const bytes = new Uint8Array(decoded.length);
+
+  for (let index = 0; index < decoded.length; index += 1) {
+    bytes[index] = decoded.charCodeAt(index);
+  }
+
+  return new Blob([bytes], { type: mimeType });
 }
 
 function readFileAsDataUrl(file: File) {

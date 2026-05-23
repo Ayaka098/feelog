@@ -20,7 +20,16 @@ export type UploadedImage = {
   size: number;
 };
 
-export type PostImage = MockImage | UploadedImage;
+export type RemoteImage = {
+  kind: "remote";
+  label: string;
+  storagePath: string;
+  signedUrl: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+export type PostImage = MockImage | UploadedImage | RemoteImage;
 
 export type Post = {
   id: string;

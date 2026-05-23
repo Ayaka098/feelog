@@ -401,7 +401,8 @@ export default function Home() {
       }
 
       setIsMutatingPost(true);
-      setTimelineStatus("");
+      setTimelineStatus(draftImage ? "画像を保存中" : "");
+      setImageStatus(draftImage ? "画像をアップロード中" : "");
       setDebugError("");
 
       try {
@@ -409,6 +410,7 @@ export default function Home() {
           supabase,
           userId: authUser.id,
           body: trimmed,
+          image: draftImage?.kind === "uploaded" ? draftImage : undefined,
         });
 
         if (
@@ -432,11 +434,15 @@ export default function Home() {
         }
         setBody("");
         setDraftImage(undefined);
-        setImageStatus(
-          draftImage ? "画像はStorage実装後に保存されます" : "",
-        );
+        setImageStatus("");
+        setTimelineStatus("");
       } catch (error) {
-        setTimelineStatus("投稿できませんでした");
+        setTimelineStatus(
+          draftImage
+            ? "画像を保存できなかったため投稿しませんでした"
+            : "投稿できませんでした",
+        );
+        setImageStatus(draftImage ? "画像アップロードに失敗しました" : "");
         setDebugError(formatDebugError("create post", error, authUser.id));
       } finally {
         setIsMutatingPost(false);
@@ -471,7 +477,9 @@ export default function Home() {
       setDraftImage(image);
       setImageStatus(
         image.dataUrl.length > MAX_STORED_IMAGE_DATA_URL_LENGTH
-          ? "大きい画像はこの画面でのみ表示されます"
+          ? isSupabaseConfigured
+            ? "画像は圧縮して保存します"
+            : "大きい画像はこの画面でのみ表示されます"
           : "",
       );
     } catch {
@@ -1283,13 +1291,15 @@ function DateField({
 }
 
 function PostImagePreview({ image }: { image: PostImage }) {
-  if (image.kind === "uploaded") {
+  if (image.kind === "uploaded" || image.kind === "remote") {
+    const imageUrl = image.kind === "uploaded" ? image.dataUrl : image.signedUrl;
+
     return (
       <div
         aria-label={image.label}
         className="aspect-[16/10] overflow-hidden rounded-2xl border border-neutral-200 bg-center bg-cover"
         role="img"
-        style={{ backgroundImage: `url(${image.dataUrl})` }}
+        style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}
       />
     );
   }

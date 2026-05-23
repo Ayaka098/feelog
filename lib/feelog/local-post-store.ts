@@ -126,6 +126,25 @@ function normalizeImage(value: unknown): PostImage | undefined {
     };
   }
 
+  if (value.kind === "remote") {
+    const label = typeof value.label === "string" ? value.label : "添付画像";
+    const storagePath = typeof value.storagePath === "string" ? value.storagePath : "";
+    const signedUrl = typeof value.signedUrl === "string" ? value.signedUrl : "";
+    const mimeType = typeof value.mimeType === "string" ? value.mimeType : "image/*";
+    const sizeBytes = Number(value.sizeBytes);
+
+    if (!storagePath || !signedUrl) return undefined;
+
+    return {
+      kind: "remote",
+      label,
+      storagePath,
+      signedUrl,
+      mimeType,
+      sizeBytes: Number.isFinite(sizeBytes) ? sizeBytes : 0,
+    };
+  }
+
   if (
     value.kind === "mock" ||
     (typeof value.gradient === "string" && typeof value.accent === "string")
