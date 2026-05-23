@@ -24,6 +24,7 @@ export type PostImage = MockImage | UploadedImage;
 
 export type Post = {
   id: string;
+  userId?: string;
   body: string;
   createdAt: string;
   updatedAt?: string;

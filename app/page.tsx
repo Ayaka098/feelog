@@ -29,6 +29,13 @@ import {
   updatePostBody,
 } from "@/lib/feelog/post-model";
 import { initialPosts } from "@/lib/feelog/seed-data";
+import {
+  createSupabasePost,
+  deleteSupabasePost,
+  fetchSupabasePostsForExport,
+  fetchSupabasePostsPage,
+  updateSupabasePost,
+} from "@/lib/feelog/supabase-post-store";
 import type { DraftImage, Post, PostImage } from "@/lib/feelog/types";
 import {
   getSupabaseBrowserClient,
@@ -38,9 +45,16 @@ import {
 const PINK = "#f8a9c8";
 const PINK_HOVER = "#f48bb5";
 const isSupabaseConfigured = hasSupabaseBrowserConfig();
+const isDevelopment = process.env.NODE_ENV !== "production";
 
 export default function Home() {
-  const [posts, setPosts] = useState<Post[]>(initialPosts);
+  const [posts, setPosts] = useState<Post[]>(
+    isSupabaseConfigured ? [] : initialPosts,
+  );
+  const [totalPosts, setTotalPosts] = useState(
+    isSupabaseConfigured ? 0 : initialPosts.length,
+  );
+  const [remoteExportPosts, setRemoteExportPosts] = useState<Post[]>([]);
   const [body, setBody] = useState("");
   const [draftImage, setDraftImage] = useState<DraftImage>();
   const [query, setQuery] = useState("");
@@ -60,10 +74,15 @@ export default function Home() {
     isSupabaseConfigured ? "" : "Supabase未設定",
   );
   const [isAuthBusy, setIsAuthBusy] = useState(false);
+  const [timelineStatus, setTimelineStatus] = useState("");
+  const [debugError, setDebugError] = useState("");
+  const [isFetchingPosts, setIsFetchingPosts] = useState(false);
+  const [isMutatingPost, setIsMutatingPost] = useState(false);
   const [visibleCount, setVisibleCount] = useState(TIMELINE_PAGE_SIZE);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const loadMoreTimerRef = useRef<number | null>(null);
+  const isSupabasePostsMode = isSupabaseConfigured && authReady && Boolean(authUser);
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => setNow(Date.now()), 0);
@@ -107,10 +126,15 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (isSupabaseConfigured) {
+      return undefined;
+    }
+
     const timer = window.setTimeout(() => {
       const storedPosts = loadLocalPosts();
       if (storedPosts) {
         setPosts(storedPosts);
+        setTotalPosts(storedPosts.length);
       }
       setStorageReady(true);
     }, 0);
@@ -119,31 +143,181 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!storageReady) return;
+    if (isSupabaseConfigured || !storageReady) return;
     saveLocalPosts(posts);
   }, [posts, storageReady]);
 
+  useEffect(() => {
+    if (!isSupabaseConfigured || !authReady) return;
+
+    let isActive = true;
+    let timer: number | null = null;
+
+    if (!authUser) {
+      timer = window.setTimeout(() => {
+        if (!isActive) return;
+        setPosts([]);
+        setTotalPosts(0);
+        setRemoteExportPosts([]);
+        setTimelineStatus("");
+        setDebugError("");
+        setIsFetchingPosts(false);
+      }, 0);
+
+      return () => {
+        isActive = false;
+        if (timer) window.clearTimeout(timer);
+      };
+    }
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+
+    timer = window.setTimeout(() => {
+      if (!isActive) return;
+
+      setIsFetchingPosts(true);
+      setTimelineStatus("");
+      setDebugError("");
+      setPosts([]);
+      setTotalPosts(0);
+      setVisibleCount(TIMELINE_PAGE_SIZE);
+
+      fetchSupabasePostsPage({
+        supabase,
+        userId: authUser.id,
+        range: { from: fromDate, to: toDate },
+        query,
+        offset: 0,
+        limit: TIMELINE_PAGE_SIZE,
+      })
+        .then(({ posts: nextPosts, total }) => {
+          if (!isActive) return;
+          setPosts(nextPosts);
+          setTotalPosts(total);
+        })
+        .catch((error: unknown) => {
+          if (!isActive) return;
+          setPosts([]);
+          setTotalPosts(0);
+          setTimelineStatus("投稿を取得できませんでした");
+          setDebugError(formatDebugError("fetch posts", error, authUser.id));
+        })
+        .finally(() => {
+          if (!isActive) return;
+          setIsFetchingPosts(false);
+        });
+    }, 0);
+
+    return () => {
+      isActive = false;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [authReady, authUser, fromDate, query, toDate]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (!isSupabaseConfigured || !authReady || !authUser) {
+      const timer = window.setTimeout(() => {
+        if (isActive) setRemoteExportPosts([]);
+      }, 0);
+
+      return () => {
+        isActive = false;
+        window.clearTimeout(timer);
+      };
+    }
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+
+    fetchSupabasePostsForExport({
+      supabase,
+      userId: authUser.id,
+      range: { from: exportFromDate, to: exportToDate },
+    })
+      .then((nextPosts) => {
+        if (!isActive) return;
+        setRemoteExportPosts(nextPosts);
+      })
+      .catch((error: unknown) => {
+        if (!isActive) return;
+        setRemoteExportPosts([]);
+        setDebugError(formatDebugError("fetch export posts", error, authUser.id));
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [authReady, authUser, exportFromDate, exportToDate]);
+
   const filteredPosts = useMemo(
-    () => filterPosts(posts, query, { from: fromDate, to: toDate }),
-    [fromDate, posts, query, toDate],
+    () =>
+      isSupabasePostsMode
+        ? posts
+        : filterPosts(posts, query, { from: fromDate, to: toDate }),
+    [fromDate, isSupabasePostsMode, posts, query, toDate],
   );
 
   const exportPosts = useMemo(
-    () => getExportPosts(posts, { from: exportFromDate, to: exportToDate }),
-    [exportFromDate, exportToDate, posts],
+    () =>
+      isSupabasePostsMode
+        ? remoteExportPosts
+        : getExportPosts(posts, { from: exportFromDate, to: exportToDate }),
+    [exportFromDate, exportToDate, isSupabasePostsMode, posts, remoteExportPosts],
   );
 
   const exportText = useMemo(() => buildExportText(exportPosts), [exportPosts]);
   const visiblePosts = useMemo(
-    () => filteredPosts.slice(0, visibleCount),
-    [filteredPosts, visibleCount],
+    () =>
+      isSupabasePostsMode ? filteredPosts : filteredPosts.slice(0, visibleCount),
+    [filteredPosts, isSupabasePostsMode, visibleCount],
   );
-  const hasMorePosts = visibleCount < filteredPosts.length;
+  const displayedTotal = isSupabasePostsMode ? totalPosts : filteredPosts.length;
+  const hasMorePosts = isSupabasePostsMode
+    ? posts.length < totalPosts
+    : visibleCount < filteredPosts.length;
 
   const loadMorePosts = useCallback(() => {
     if (!hasMorePosts || isLoadingMore) return;
 
     setIsLoadingMore(true);
+
+    if (isSupabasePostsMode && authUser) {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) {
+        setIsLoadingMore(false);
+        return;
+      }
+
+      fetchSupabasePostsPage({
+        supabase,
+        userId: authUser.id,
+        range: { from: fromDate, to: toDate },
+        query,
+        offset: posts.length,
+        limit: TIMELINE_PAGE_SIZE,
+      })
+        .then(({ posts: nextPosts, total }) => {
+          setPosts((currentPosts) => {
+            const existingIds = new Set(currentPosts.map((post) => post.id));
+            const mergedPosts = [
+              ...currentPosts,
+              ...nextPosts.filter((post) => !existingIds.has(post.id)),
+            ];
+            return mergedPosts;
+          });
+          setTotalPosts(total);
+        })
+        .catch((error: unknown) => {
+          setTimelineStatus("続きを取得できませんでした");
+          setDebugError(formatDebugError("fetch more posts", error, authUser.id));
+        })
+        .finally(() => setIsLoadingMore(false));
+      return;
+    }
+
     loadMoreTimerRef.current = window.setTimeout(() => {
       setVisibleCount((currentCount) =>
         Math.min(currentCount + TIMELINE_PAGE_SIZE, filteredPosts.length),
@@ -151,7 +325,17 @@ export default function Home() {
       loadMoreTimerRef.current = null;
       setIsLoadingMore(false);
     }, 160);
-  }, [filteredPosts.length, hasMorePosts, isLoadingMore]);
+  }, [
+    authUser,
+    filteredPosts.length,
+    fromDate,
+    hasMorePosts,
+    isLoadingMore,
+    isSupabasePostsMode,
+    posts.length,
+    query,
+    toDate,
+  ]);
 
   useEffect(() => {
     const target = loadMoreRef.current;
@@ -203,14 +387,68 @@ export default function Home() {
     resetTimelineWindow();
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = body.trim();
     if (!trimmed) return;
 
+    if (isSupabaseConfigured) {
+      const supabase = getSupabaseBrowserClient();
+
+      if (!supabase || !authUser) {
+        setTimelineStatus("ログインすると投稿できます");
+        return;
+      }
+
+      setIsMutatingPost(true);
+      setTimelineStatus("");
+      setDebugError("");
+
+      try {
+        const nextPost = await createSupabasePost({
+          supabase,
+          userId: authUser.id,
+          body: trimmed,
+        });
+
+        if (
+          filterPosts([nextPost], query, { from: fromDate, to: toDate }).length > 0
+        ) {
+          setPosts((currentPosts) => [nextPost, ...currentPosts]);
+          setTotalPosts((currentTotal) => currentTotal + 1);
+        }
+        if (
+          filterPosts([nextPost], "", {
+            from: exportFromDate,
+            to: exportToDate,
+          }).length > 0
+        ) {
+          setRemoteExportPosts((currentPosts) =>
+            getExportPosts([...currentPosts, nextPost], {
+              from: exportFromDate,
+              to: exportToDate,
+            }),
+          );
+        }
+        setBody("");
+        setDraftImage(undefined);
+        setImageStatus(
+          draftImage ? "画像はStorage実装後に保存されます" : "",
+        );
+      } catch (error) {
+        setTimelineStatus("投稿できませんでした");
+        setDebugError(formatDebugError("create post", error, authUser.id));
+      } finally {
+        setIsMutatingPost(false);
+      }
+
+      return;
+    }
+
     const nextPost = createPost({ body: trimmed, image: draftImage });
 
     setPosts((currentPosts) => [nextPost, ...currentPosts]);
+    setTotalPosts((currentTotal) => currentTotal + 1);
     setBody("");
     setDraftImage(undefined);
     setImageStatus("");
@@ -251,18 +489,86 @@ export default function Home() {
     setEditingBody(post.body);
   }
 
-  function saveEditing(postId: string) {
+  async function saveEditing(postId: string) {
     const trimmed = editingBody.trim();
     if (!trimmed) return;
+
+    if (isSupabasePostsMode && authUser) {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) return;
+
+      setIsMutatingPost(true);
+      setTimelineStatus("");
+      setDebugError("");
+
+      try {
+        const updatedPost = await updateSupabasePost({
+          supabase,
+          userId: authUser.id,
+          postId,
+          body: trimmed,
+        });
+
+        const stillMatchesTimeline =
+          filterPosts([updatedPost], query, { from: fromDate, to: toDate }).length >
+          0;
+        setPosts((currentPosts) =>
+          stillMatchesTimeline
+            ? currentPosts.map((post) => (post.id === postId ? updatedPost : post))
+            : deletePostById(currentPosts, postId),
+        );
+        if (!stillMatchesTimeline) {
+          setTotalPosts((currentTotal) => Math.max(0, currentTotal - 1));
+        }
+        setRemoteExportPosts((currentPosts) =>
+          currentPosts.map((post) => (post.id === postId ? updatedPost : post)),
+        );
+        setEditingId(null);
+        setEditingBody("");
+      } catch (error) {
+        setTimelineStatus("編集を保存できませんでした");
+        setDebugError(formatDebugError("update post", error, authUser.id, postId));
+      } finally {
+        setIsMutatingPost(false);
+      }
+
+      return;
+    }
+
     setPosts((currentPosts) => updatePostBody(currentPosts, postId, trimmed));
     setEditingId(null);
     setEditingBody("");
   }
 
-  function deletePost(postId: string) {
+  async function deletePost(postId: string) {
     const confirmed = window.confirm("この投稿を削除しますか？");
     if (!confirmed) return;
+
+    if (isSupabasePostsMode && authUser) {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) return;
+
+      setIsMutatingPost(true);
+      setTimelineStatus("");
+      setDebugError("");
+
+      try {
+        await deleteSupabasePost({ supabase, userId: authUser.id, postId });
+        setPosts((currentPosts) => deletePostById(currentPosts, postId));
+        setRemoteExportPosts((currentPosts) => deletePostById(currentPosts, postId));
+        setTotalPosts((currentTotal) => Math.max(0, currentTotal - 1));
+      } catch (error) {
+        setTimelineStatus("削除できませんでした");
+        setDebugError(formatDebugError("delete post", error, authUser.id, postId));
+      } finally {
+        setIsMutatingPost(false);
+      }
+
+      return;
+    }
+
     setPosts((currentPosts) => deletePostById(currentPosts, postId));
+    setTotalPosts((currentTotal) => Math.max(0, currentTotal - 1));
   }
 
   async function signInWithGoogle() {
@@ -345,6 +651,7 @@ export default function Home() {
           <Composer
             body={body}
             draftImage={draftImage}
+            isPostDisabled={isMutatingPost || (isSupabaseConfigured && !authUser)}
             onBodyChange={setBody}
             onClearImage={clearDraftImage}
             onImageFileChange={handleImageFileChange}
@@ -362,7 +669,7 @@ export default function Home() {
               idPrefix="mobile"
               onCopy={copyExportText}
               query={query}
-              resultCount={filteredPosts.length}
+              resultCount={displayedTotal}
               setExportFromDate={setExportFromDate}
               setExportToDate={setExportToDate}
               setFromDate={handleFromDateChange}
@@ -371,9 +678,10 @@ export default function Home() {
               toDate={toDate}
             />
           </div>
+          <DebugErrorNotice message={debugError} />
 
           <section aria-label="タイムライン">
-            {filteredPosts.length > 0 ? (
+            {visiblePosts.length > 0 ? (
               <>
                 {visiblePosts.map((post) => (
                   <PostItem
@@ -402,17 +710,27 @@ export default function Home() {
                     <span>これ以上ありません</span>
                   )}
                   <p className="mt-1 text-[12px] text-neutral-400">
-                    {visiblePosts.length} / {filteredPosts.length}
+                    {visiblePosts.length} / {displayedTotal}
                   </p>
                 </div>
               </>
             ) : (
               <div className="px-6 py-14 text-center">
                 <p className="text-[15px] font-semibold text-neutral-900">
-                  見つかりませんでした
+                  {isFetchingPosts
+                    ? "読み込み中"
+                    : isSupabaseConfigured && !authUser
+                      ? "ログインしてください"
+                      : timelineStatus || "見つかりませんでした"}
                 </p>
                 <p className="mt-1 text-[14px] text-neutral-500">
-                  検索条件を少しゆるめてみてください。
+                  {isFetchingPosts
+                    ? "投稿を取得しています。"
+                    : isSupabaseConfigured && !authUser
+                      ? "Googleログイン後、自分の投稿だけが表示されます。"
+                      : timelineStatus
+                        ? "少し時間を置いてもう一度試してください。"
+                        : "検索条件を少しゆるめてみてください。"}
                 </p>
               </div>
             )}
@@ -430,7 +748,7 @@ export default function Home() {
               idPrefix="desktop"
               onCopy={copyExportText}
               query={query}
-              resultCount={filteredPosts.length}
+              resultCount={displayedTotal}
               setExportFromDate={setExportFromDate}
               setExportToDate={setExportToDate}
               setFromDate={handleFromDateChange}
@@ -443,6 +761,53 @@ export default function Home() {
       </div>
     </div>
   );
+}
+
+function DebugErrorNotice({ message }: { message: string }) {
+  if (!isDevelopment || !message) return null;
+
+  return (
+    <div className="border-b border-pink-200 bg-pink-50 px-4 py-3 text-[13px] leading-5 text-neutral-700">
+      <p className="font-bold text-neutral-900">開発用エラー</p>
+      <p className="mt-1 break-words font-mono text-[12px]">{message}</p>
+      <p className="mt-1 text-[12px] text-neutral-500">
+        詳細はブラウザのconsole.errorを確認してください。
+      </p>
+    </div>
+  );
+}
+
+function formatDebugError(operation: string, error: unknown, userId?: string, postId?: string) {
+  const parts = [`${operation} failed`];
+
+  if (isErrorRecord(error)) {
+    const code = getStringValue(error.code);
+    const message = getStringValue(error.message);
+    const details = getStringValue(error.details);
+    const hint = getStringValue(error.hint);
+
+    if (code) parts.push(`code=${code}`);
+    if (message) parts.push(`message=${message}`);
+    if (details) parts.push(`details=${details}`);
+    if (hint) parts.push(`hint=${hint}`);
+  } else if (error instanceof Error) {
+    parts.push(`message=${error.message}`);
+  } else if (typeof error === "string") {
+    parts.push(`message=${error}`);
+  }
+
+  if (userId) parts.push(`authUser.id=${userId}`);
+  if (postId) parts.push(`postId=${postId}`);
+
+  return parts.join(" / ");
+}
+
+function isErrorRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getStringValue(value: unknown) {
+  return typeof value === "string" ? value : "";
 }
 
 function AuthControls({
@@ -471,7 +836,7 @@ function AuthControls({
           <p className="truncate text-[13px] font-semibold leading-4 text-neutral-900">
             {user.email ?? "ログイン中"}
           </p>
-          <p className="text-[12px] leading-4 text-neutral-500">投稿はローカル保存</p>
+          <p className="text-[12px] leading-4 text-neutral-500">投稿はSupabase保存</p>
         </div>
       ) : status ? (
         <p className="hidden max-w-36 truncate text-right text-[12px] leading-4 text-neutral-500 sm:block">
@@ -569,6 +934,7 @@ function AppRail() {
 function Composer({
   body,
   draftImage,
+  isPostDisabled,
   onBodyChange,
   onClearImage,
   onImageFileChange,
@@ -577,6 +943,7 @@ function Composer({
 }: {
   body: string;
   draftImage: DraftImage;
+  isPostDisabled: boolean;
   onBodyChange: (value: string) => void;
   onClearImage: () => void;
   onImageFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -638,8 +1005,8 @@ function Composer({
             </div>
             <button
               className="h-9 shrink-0 rounded-full px-5 text-[15px] font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!body.trim()}
-              style={{ backgroundColor: body.trim() ? PINK : "#f5b8cf" }}
+              disabled={!body.trim() || isPostDisabled}
+              style={{ backgroundColor: body.trim() && !isPostDisabled ? PINK : "#f5b8cf" }}
               type="submit"
             >
               投稿
