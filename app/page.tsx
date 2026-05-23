@@ -1,432 +1,40 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-
-type HeartGrowth = {
-  initial: number;
-  max: number;
-  plateauHours: number;
-  velocity: number;
-};
-
-type MockImage = {
-  kind: "mock";
-  label: string;
-  gradient: string;
-  accent: string;
-};
-
-type UploadedImage = {
-  kind: "uploaded";
-  label: string;
-  dataUrl: string;
-  mimeType: string;
-  size: number;
-};
-
-type PostImage = MockImage | UploadedImage;
-
-type FeelogPost = {
-  id: string;
-  body: string;
-  createdAt: string;
-  updatedAt?: string;
-  growth: HeartGrowth;
-  image?: PostImage;
-};
-
-type DraftImage = PostImage | undefined;
+import {
+  ChangeEvent,
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { writeClipboardText } from "@/lib/feelog/clipboard";
+import {
+  HYDRATION_NOW,
+  MAX_STORED_IMAGE_DATA_URL_LENGTH,
+  TIMELINE_PAGE_SIZE,
+} from "@/lib/feelog/constants";
+import { fileToUploadedImage } from "@/lib/feelog/image-processing";
+import { loadLocalPosts, saveLocalPosts } from "@/lib/feelog/local-post-store";
+import {
+  buildExportText,
+  calculatePseudoHearts,
+  createPost,
+  deletePostById,
+  filterPosts,
+  formatPostTime,
+  getExportPosts,
+  updatePostBody,
+} from "@/lib/feelog/post-model";
+import { initialPosts } from "@/lib/feelog/seed-data";
+import type { DraftImage, Post, PostImage } from "@/lib/feelog/types";
 
 const PINK = "#f8a9c8";
 const PINK_HOVER = "#f48bb5";
-const HYDRATION_NOW = new Date("2026-05-22T12:00:00+09:00").getTime();
-const STORAGE_KEY = "feelog.posts.v1";
-const MAX_IMAGE_EDGE = 1600;
-const MAX_STORED_IMAGE_DATA_URL_LENGTH = 2_800_000;
-
-const imagePresets: MockImage[] = [
-  {
-    kind: "mock",
-    label: "窓辺",
-    gradient:
-      "linear-gradient(135deg, #f8a9c8 0%, #ffd9e6 42%, #b9e8ff 100%)",
-    accent: "#f48bb5",
-  },
-  {
-    kind: "mock",
-    label: "夜道",
-    gradient:
-      "linear-gradient(135deg, #1f2937 0%, #64748b 48%, #f8a9c8 100%)",
-    accent: "#94a3b8",
-  },
-  {
-    kind: "mock",
-    label: "机",
-    gradient:
-      "linear-gradient(135deg, #fafafa 0%, #e5e7eb 46%, #fde68a 100%)",
-    accent: "#facc15",
-  },
-  {
-    kind: "mock",
-    label: "空",
-    gradient:
-      "linear-gradient(135deg, #dbeafe 0%, #bae6fd 50%, #fecdd3 100%)",
-    accent: "#38bdf8",
-  },
-];
-
-const initialPosts: FeelogPost[] = [
-  {
-    id: "seed-1",
-    body: "朝の空気が思ったより軽かった。\n昨日の不安がまだ少し残っているけど、コーヒーを淹れたら体のほうが先に起きてくれた感じがする。",
-    createdAt: "2026-05-22T08:18:00+09:00",
-    growth: { initial: 4, max: 328, plateauHours: 82, velocity: 2.2 },
-    image: imagePresets[0],
-  },
-  {
-    id: "seed-2",
-    body: "返事を急がなくていい、と思えた瞬間に肩が少し下がった。ちゃんと落ち着いてからでいい。",
-    createdAt: "2026-05-21T23:41:00+09:00",
-    growth: { initial: 7, max: 612, plateauHours: 96, velocity: 1.65 },
-  },
-  {
-    id: "seed-3",
-    body: "昼に散歩した。何かが解決したわけじゃないけど、歩幅がそろうと考えも少しそろう。",
-    createdAt: "2026-05-21T14:06:00+09:00",
-    growth: { initial: 11, max: 184, plateauHours: 58, velocity: 2.6 },
-    image: imagePresets[3],
-  },
-  {
-    id: "seed-4",
-    body: "あの一言が思ったより刺さっていた。怒りというより、雑に扱われた感じが残っている。",
-    createdAt: "2026-05-20T19:33:00+09:00",
-    growth: { initial: 2, max: 873, plateauHours: 118, velocity: 1.45 },
-  },
-  {
-    id: "seed-5",
-    body: "今日は何も進んでいないようで、実はかなり休めた日だったのかもしれない。",
-    createdAt: "2026-05-18T22:09:00+09:00",
-    growth: { initial: 13, max: 421, plateauHours: 72, velocity: 2.05 },
-  },
-  {
-    id: "seed-6",
-    body: "机の上を少し片付けた。視界が静かになると、頭の中もほんの少し静かになる。",
-    createdAt: "2026-05-17T10:24:00+09:00",
-    growth: { initial: 8, max: 255, plateauHours: 64, velocity: 2.4 },
-    image: imagePresets[2],
-  },
-];
-
-const dateFormatter = new Intl.DateTimeFormat("ja-JP", {
-  month: "numeric",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
-const exportDateFormatter = new Intl.DateTimeFormat("ja-JP", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function calculatePseudoHearts(post: FeelogPost, now: number) {
-  const ageHours = Math.max(
-    0,
-    (now - new Date(post.createdAt).getTime()) / (1000 * 60 * 60),
-  );
-  const progress = clamp(ageHours / post.growth.plateauHours, 0, 1);
-  const eased = 1 - Math.pow(1 - progress, post.growth.velocity);
-  return Math.min(
-    post.growth.max,
-    Math.round(post.growth.initial + (post.growth.max - post.growth.initial) * eased),
-  );
-}
-
-function formatPostTime(iso: string) {
-  return dateFormatter.format(new Date(iso));
-}
-
-function formatExportTime(iso: string) {
-  return exportDateFormatter.format(new Date(iso));
-}
-
-function getDateInputValue(iso: string) {
-  const date = new Date(iso);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function isWithinDateRange(post: FeelogPost, from: string, to: string) {
-  const day = getDateInputValue(post.createdAt);
-  if (from && day < from) return false;
-  if (to && day > to) return false;
-  return true;
-}
-
-function createGrowth(): HeartGrowth {
-  const max = Math.round(120 + Math.random() * 760);
-  return {
-    initial: Math.round(Math.random() * 10),
-    max,
-    plateauHours: Math.round(54 + Math.random() * 70),
-    velocity: 1.35 + Math.random() * 1.25,
-  };
-}
-
-function createId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `post-${Date.now()}-${Math.round(Math.random() * 10000)}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function normalizeGrowth(value: unknown): HeartGrowth | null {
-  if (!isRecord(value)) return null;
-
-  const initial = Number(value.initial);
-  const max = Number(value.max);
-  const plateauHours = Number(value.plateauHours);
-  const velocity = Number(value.velocity);
-
-  if (
-    !Number.isFinite(initial) ||
-    !Number.isFinite(max) ||
-    !Number.isFinite(plateauHours) ||
-    !Number.isFinite(velocity)
-  ) {
-    return null;
-  }
-
-  return {
-    initial: clamp(Math.round(initial), 0, 30),
-    max: clamp(Math.round(max), 0, 900),
-    plateauHours: clamp(plateauHours, 12, 240),
-    velocity: clamp(velocity, 0.6, 4),
-  };
-}
-
-function normalizeImage(value: unknown): PostImage | undefined {
-  if (!isRecord(value)) return undefined;
-
-  if (value.kind === "uploaded") {
-    const label = typeof value.label === "string" ? value.label : "添付画像";
-    const dataUrl = typeof value.dataUrl === "string" ? value.dataUrl : "";
-    const mimeType = typeof value.mimeType === "string" ? value.mimeType : "image/*";
-    const size = Number(value.size);
-
-    if (!dataUrl.startsWith("data:image/")) return undefined;
-
-    return {
-      kind: "uploaded",
-      label,
-      dataUrl,
-      mimeType,
-      size: Number.isFinite(size) ? size : dataUrl.length,
-    };
-  }
-
-  if (
-    value.kind === "mock" ||
-    (typeof value.gradient === "string" && typeof value.accent === "string")
-  ) {
-    return {
-      kind: "mock",
-      label: typeof value.label === "string" ? value.label : "画像",
-      gradient: typeof value.gradient === "string" ? value.gradient : imagePresets[0].gradient,
-      accent: typeof value.accent === "string" ? value.accent : imagePresets[0].accent,
-    };
-  }
-
-  return undefined;
-}
-
-function normalizePost(value: unknown): FeelogPost | null {
-  if (!isRecord(value)) return null;
-
-  const id = typeof value.id === "string" ? value.id : "";
-  const body = typeof value.body === "string" ? value.body : "";
-  const createdAt = typeof value.createdAt === "string" ? value.createdAt : "";
-  const updatedAt = typeof value.updatedAt === "string" ? value.updatedAt : undefined;
-  const growth = normalizeGrowth(value.growth);
-
-  if (!id || !body || !createdAt || Number.isNaN(new Date(createdAt).getTime()) || !growth) {
-    return null;
-  }
-
-  return {
-    id,
-    body,
-    createdAt,
-    updatedAt,
-    growth,
-    image: normalizeImage(value.image),
-  };
-}
-
-function loadStoredPosts() {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return null;
-
-    const posts = parsed
-      .map((item) => normalizePost(item))
-      .filter((item): item is FeelogPost => Boolean(item))
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      );
-
-    return posts;
-  } catch {
-    return null;
-  }
-}
-
-function preparePostsForStorage(posts: FeelogPost[]) {
-  return posts.map((post) => {
-    if (
-      post.image?.kind === "uploaded" &&
-      post.image.dataUrl.length > MAX_STORED_IMAGE_DATA_URL_LENGTH
-    ) {
-      return { ...post, image: undefined };
-    }
-
-    return post;
-  });
-}
-
-function savePostsToStorage(posts: FeelogPost[]) {
-  const preparedPosts = preparePostsForStorage(posts);
-
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(preparedPosts));
-  } catch {
-    const withoutUploadedImages = preparedPosts.map((post) =>
-      post.image?.kind === "uploaded" ? { ...post, image: undefined } : post,
-    );
-
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(withoutUploadedImages));
-    } catch {
-      // localStorage may be unavailable in private mode. The in-memory app still works.
-    }
-  }
-}
-
-function buildExportText(posts: FeelogPost[]) {
-  return posts
-    .map((post) => `${formatExportTime(post.createdAt)}\n${post.body.trim()}`)
-    .join("\n\n---\n\n");
-}
-
-async function writeClipboardText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  document.body.appendChild(textarea);
-  textarea.select();
-  const copied = document.execCommand("copy");
-  document.body.removeChild(textarea);
-
-  if (!copied) {
-    throw new Error("コピーできませんでした");
-  }
-}
-
-function readFileAsDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-      } else {
-        reject(new Error("画像を読み込めませんでした"));
-      }
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("画像を読み込めませんでした"));
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadImageElement(dataUrl: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new window.Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("画像を読み込めませんでした"));
-    image.src = dataUrl;
-  });
-}
-
-async function fileToUploadedImage(file: File): Promise<UploadedImage> {
-  const originalDataUrl = await readFileAsDataUrl(file);
-
-  try {
-    const image = await loadImageElement(originalDataUrl);
-    const scale = Math.min(
-      1,
-      MAX_IMAGE_EDGE / Math.max(image.naturalWidth, image.naturalHeight),
-    );
-    const width = Math.max(1, Math.round(image.naturalWidth * scale));
-    const height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-
-    if (!context) {
-      throw new Error("画像を変換できませんでした");
-    }
-
-    canvas.width = width;
-    canvas.height = height;
-    context.drawImage(image, 0, 0, width, height);
-
-    const webpDataUrl = canvas.toDataURL("image/webp", 0.82);
-    const dataUrl = webpDataUrl.startsWith("data:image/webp")
-      ? webpDataUrl
-      : canvas.toDataURL("image/jpeg", 0.84);
-
-    return {
-      kind: "uploaded",
-      label: file.name || "添付画像",
-      dataUrl,
-      mimeType: dataUrl.slice(5, dataUrl.indexOf(";")) || file.type,
-      size: dataUrl.length,
-    };
-  } catch {
-    return {
-      kind: "uploaded",
-      label: file.name || "添付画像",
-      dataUrl: originalDataUrl,
-      mimeType: file.type || "image/*",
-      size: originalDataUrl.length,
-    };
-  }
-}
 
 export default function Home() {
-  const [posts, setPosts] = useState<FeelogPost[]>(initialPosts);
+  const [posts, setPosts] = useState<Post[]>(initialPosts);
   const [body, setBody] = useState("");
   const [draftImage, setDraftImage] = useState<DraftImage>();
   const [query, setQuery] = useState("");
@@ -440,6 +48,10 @@ export default function Home() {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [storageReady, setStorageReady] = useState(false);
   const [imageStatus, setImageStatus] = useState("");
+  const [visibleCount, setVisibleCount] = useState(TIMELINE_PAGE_SIZE);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => setNow(Date.now()), 0);
@@ -452,7 +64,7 @@ export default function Home() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const storedPosts = loadStoredPosts();
+      const storedPosts = loadLocalPosts();
       if (storedPosts) {
         setPosts(storedPosts);
       }
@@ -464,44 +76,95 @@ export default function Home() {
 
   useEffect(() => {
     if (!storageReady) return;
-    savePostsToStorage(posts);
+    saveLocalPosts(posts);
   }, [posts, storageReady]);
 
-  const filteredPosts = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    return posts.filter((post) => {
-      const matchesQuery =
-        normalizedQuery.length === 0 ||
-        post.body.toLocaleLowerCase().includes(normalizedQuery);
-      return matchesQuery && isWithinDateRange(post, fromDate, toDate);
-    });
-  }, [fromDate, posts, query, toDate]);
+  const filteredPosts = useMemo(
+    () => filterPosts(posts, query, { from: fromDate, to: toDate }),
+    [fromDate, posts, query, toDate],
+  );
 
   const exportPosts = useMemo(
-    () =>
-      posts
-        .filter((post) => isWithinDateRange(post, exportFromDate, exportToDate))
-        .sort(
-          (a, b) =>
-            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-        ),
+    () => getExportPosts(posts, { from: exportFromDate, to: exportToDate }),
     [exportFromDate, exportToDate, posts],
   );
 
   const exportText = useMemo(() => buildExportText(exportPosts), [exportPosts]);
+  const visiblePosts = useMemo(
+    () => filteredPosts.slice(0, visibleCount),
+    [filteredPosts, visibleCount],
+  );
+  const hasMorePosts = visibleCount < filteredPosts.length;
+
+  const loadMorePosts = useCallback(() => {
+    if (!hasMorePosts || isLoadingMore) return;
+
+    setIsLoadingMore(true);
+    loadMoreTimerRef.current = window.setTimeout(() => {
+      setVisibleCount((currentCount) =>
+        Math.min(currentCount + TIMELINE_PAGE_SIZE, filteredPosts.length),
+      );
+      loadMoreTimerRef.current = null;
+      setIsLoadingMore(false);
+    }, 160);
+  }, [filteredPosts.length, hasMorePosts, isLoadingMore]);
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || !hasMorePosts) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          loadMorePosts();
+        }
+      },
+      { rootMargin: "700px 0px 900px" },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMorePosts, loadMorePosts]);
+
+  useEffect(
+    () => () => {
+      if (loadMoreTimerRef.current) {
+        window.clearTimeout(loadMoreTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  function resetTimelineWindow() {
+    if (loadMoreTimerRef.current) {
+      window.clearTimeout(loadMoreTimerRef.current);
+      loadMoreTimerRef.current = null;
+    }
+    setVisibleCount(TIMELINE_PAGE_SIZE);
+    setIsLoadingMore(false);
+  }
+
+  function handleQueryChange(value: string) {
+    setQuery(value);
+    resetTimelineWindow();
+  }
+
+  function handleFromDateChange(value: string) {
+    setFromDate(value);
+    resetTimelineWindow();
+  }
+
+  function handleToDateChange(value: string) {
+    setToDate(value);
+    resetTimelineWindow();
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = body.trim();
     if (!trimmed) return;
 
-    const nextPost: FeelogPost = {
-      id: createId(),
-      body: trimmed,
-      createdAt: new Date().toISOString(),
-      growth: createGrowth(),
-      image: draftImage,
-    };
+    const nextPost = createPost({ body: trimmed, image: draftImage });
 
     setPosts((currentPosts) => [nextPost, ...currentPosts]);
     setBody("");
@@ -539,7 +202,7 @@ export default function Home() {
     setImageStatus("");
   }
 
-  function startEditing(post: FeelogPost) {
+  function startEditing(post: Post) {
     setEditingId(post.id);
     setEditingBody(post.body);
   }
@@ -547,13 +210,7 @@ export default function Home() {
   function saveEditing(postId: string) {
     const trimmed = editingBody.trim();
     if (!trimmed) return;
-    setPosts((currentPosts) =>
-      currentPosts.map((post) =>
-        post.id === postId
-          ? { ...post, body: trimmed, updatedAt: new Date().toISOString() }
-          : post,
-      ),
-    );
+    setPosts((currentPosts) => updatePostBody(currentPosts, postId, trimmed));
     setEditingId(null);
     setEditingBody("");
   }
@@ -561,7 +218,7 @@ export default function Home() {
   function deletePost(postId: string) {
     const confirmed = window.confirm("この投稿を削除しますか？");
     if (!confirmed) return;
-    setPosts((currentPosts) => currentPosts.filter((post) => post.id !== postId));
+    setPosts((currentPosts) => deletePostById(currentPosts, postId));
   }
 
   async function copyExportText() {
@@ -611,32 +268,47 @@ export default function Home() {
               resultCount={filteredPosts.length}
               setExportFromDate={setExportFromDate}
               setExportToDate={setExportToDate}
-              setFromDate={setFromDate}
-              setQuery={setQuery}
-              setToDate={setToDate}
+              setFromDate={handleFromDateChange}
+              setQuery={handleQueryChange}
+              setToDate={handleToDateChange}
               toDate={toDate}
             />
           </div>
 
           <section aria-label="タイムライン">
             {filteredPosts.length > 0 ? (
-              filteredPosts.map((post) => (
-                <PostItem
-                  editingBody={editingBody}
-                  editingId={editingId}
-                  hearts={calculatePseudoHearts(post, now)}
-                  key={post.id}
-                  onCancelEdit={() => {
-                    setEditingId(null);
-                    setEditingBody("");
-                  }}
-                  onDelete={() => deletePost(post.id)}
-                  onEdit={() => startEditing(post)}
-                  onEditingBodyChange={setEditingBody}
-                  onSaveEdit={() => saveEditing(post.id)}
-                  post={post}
-                />
-              ))
+              <>
+                {visiblePosts.map((post) => (
+                  <PostItem
+                    editingBody={editingBody}
+                    editingId={editingId}
+                    hearts={calculatePseudoHearts(post, now)}
+                    key={post.id}
+                    onCancelEdit={() => {
+                      setEditingId(null);
+                      setEditingBody("");
+                    }}
+                    onDelete={() => deletePost(post.id)}
+                    onEdit={() => startEditing(post)}
+                    onEditingBodyChange={setEditingBody}
+                    onSaveEdit={() => saveEditing(post.id)}
+                    post={post}
+                  />
+                ))}
+                <div
+                  className="border-b border-neutral-200 px-6 py-6 text-center text-[14px] text-neutral-500"
+                  ref={loadMoreRef}
+                >
+                  {hasMorePosts ? (
+                    <span>{isLoadingMore ? "読み込み中" : "続きを読み込んでいます"}</span>
+                  ) : (
+                    <span>これ以上ありません</span>
+                  )}
+                  <p className="mt-1 text-[12px] text-neutral-400">
+                    {visiblePosts.length} / {filteredPosts.length}
+                  </p>
+                </div>
+              </>
             ) : (
               <div className="px-6 py-14 text-center">
                 <p className="text-[15px] font-semibold text-neutral-900">
@@ -664,9 +336,9 @@ export default function Home() {
               resultCount={filteredPosts.length}
               setExportFromDate={setExportFromDate}
               setExportToDate={setExportToDate}
-              setFromDate={setFromDate}
-              setQuery={setQuery}
-              setToDate={setToDate}
+              setFromDate={handleFromDateChange}
+              setQuery={handleQueryChange}
+              setToDate={handleToDateChange}
               toDate={toDate}
             />
           </div>
@@ -777,10 +449,10 @@ function Composer({
             </div>
           ) : null}
 
-          <div className="flex items-center justify-between border-t border-neutral-100 py-3">
-            <div className="flex min-w-0 items-center gap-2">
+          <div className="flex items-center justify-between gap-2 border-t border-neutral-100 py-3">
+            <div className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden">
               <label
-                className="flex h-9 cursor-pointer items-center gap-2 rounded-full px-3 text-[14px] font-semibold transition-colors hover:bg-pink-50"
+                className="flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full px-3 text-[14px] font-semibold transition-colors hover:bg-pink-50"
                 style={{ color: PINK_HOVER }}
               >
                 <span aria-hidden="true" className="text-[18px] leading-none">
@@ -796,7 +468,7 @@ function Composer({
               </label>
               {draftImage ? (
                 <button
-                  className="h-9 rounded-full px-3 text-[13px] font-semibold text-neutral-500 transition-colors hover:bg-neutral-100"
+                  className="h-9 shrink-0 rounded-full px-3 text-[13px] font-semibold text-neutral-500 transition-colors hover:bg-neutral-100"
                   onClick={onClearImage}
                   type="button"
                 >
@@ -810,7 +482,7 @@ function Composer({
               ) : null}
             </div>
             <button
-              className="h-9 rounded-full px-5 text-[15px] font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-9 shrink-0 rounded-full px-5 text-[15px] font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!body.trim()}
               style={{ backgroundColor: body.trim() ? PINK : "#f5b8cf" }}
               type="submit"
@@ -843,7 +515,7 @@ function PostItem({
   onEdit: () => void;
   onEditingBodyChange: (value: string) => void;
   onSaveEdit: () => void;
-  post: FeelogPost;
+  post: Post;
 }) {
   const isEditing = editingId === post.id;
 
