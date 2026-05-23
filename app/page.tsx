@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { User } from "@supabase/supabase-js";
 import { writeClipboardText } from "@/lib/feelog/clipboard";
 import {
   HYDRATION_NOW,
@@ -29,9 +30,14 @@ import {
 } from "@/lib/feelog/post-model";
 import { initialPosts } from "@/lib/feelog/seed-data";
 import type { DraftImage, Post, PostImage } from "@/lib/feelog/types";
+import {
+  getSupabaseBrowserClient,
+  hasSupabaseBrowserConfig,
+} from "@/lib/supabase/client";
 
 const PINK = "#f8a9c8";
 const PINK_HOVER = "#f48bb5";
+const isSupabaseConfigured = hasSupabaseBrowserConfig();
 
 export default function Home() {
   const [posts, setPosts] = useState<Post[]>(initialPosts);
@@ -48,6 +54,12 @@ export default function Home() {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [storageReady, setStorageReady] = useState(false);
   const [imageStatus, setImageStatus] = useState("");
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
+  const [authStatus, setAuthStatus] = useState(
+    isSupabaseConfigured ? "" : "Supabase未設定",
+  );
+  const [isAuthBusy, setIsAuthBusy] = useState(false);
   const [visibleCount, setVisibleCount] = useState(TIMELINE_PAGE_SIZE);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -59,6 +71,38 @@ export default function Home() {
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+
+    let isActive = true;
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!isActive) return;
+
+      if (error) {
+        setAuthStatus("ログイン状態を取得できませんでした");
+      }
+
+      setAuthUser(data.session?.user ?? null);
+      setAuthReady(true);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ?? null);
+      setAuthReady(true);
+      setIsAuthBusy(false);
+      setAuthStatus("");
+    });
+
+    return () => {
+      isActive = false;
+      subscription.unsubscribe();
     };
   }, []);
 
@@ -221,6 +265,50 @@ export default function Home() {
     setPosts((currentPosts) => deletePostById(currentPosts, postId));
   }
 
+  async function signInWithGoogle() {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setAuthStatus("Supabaseの環境変数が未設定です");
+      return;
+    }
+
+    setIsAuthBusy(true);
+    setAuthStatus("");
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+
+    if (error) {
+      setAuthStatus("Googleログインを開始できませんでした");
+      setIsAuthBusy(false);
+    }
+  }
+
+  async function signOut() {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setAuthStatus("Supabaseの環境変数が未設定です");
+      return;
+    }
+
+    setIsAuthBusy(true);
+    setAuthStatus("");
+
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      setAuthStatus("ログアウトできませんでした");
+    } else {
+      setAuthUser(null);
+    }
+
+    setIsAuthBusy(false);
+  }
+
   async function copyExportText() {
     if (!exportText) return;
     try {
@@ -238,11 +326,20 @@ export default function Home() {
         <AppRail />
 
         <main className="min-h-screen border-x border-neutral-200 bg-white" id="top">
-          <header className="sticky top-0 z-30 flex h-[53px] items-center border-b border-neutral-200 bg-white/90 px-4 backdrop-blur-md">
+          <header className="sticky top-0 z-30 flex min-h-[53px] items-center justify-between gap-3 border-b border-neutral-200 bg-white/90 px-4 py-2 backdrop-blur-md">
             <div>
               <h1 className="text-xl font-bold leading-6 tracking-normal">feelog</h1>
               <p className="text-[13px] leading-4 text-neutral-500">感情の備忘録</p>
             </div>
+            <AuthControls
+              isBusy={isAuthBusy}
+              isConfigured={isSupabaseConfigured}
+              isReady={authReady}
+              onSignIn={signInWithGoogle}
+              onSignOut={signOut}
+              status={authStatus}
+              user={authUser}
+            />
           </header>
 
           <Composer
@@ -344,6 +441,64 @@ export default function Home() {
           </div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+function AuthControls({
+  isBusy,
+  isConfigured,
+  isReady,
+  onSignIn,
+  onSignOut,
+  status,
+  user,
+}: {
+  isBusy: boolean;
+  isConfigured: boolean;
+  isReady: boolean;
+  onSignIn: () => void;
+  onSignOut: () => void;
+  status: string;
+  user: User | null;
+}) {
+  const isDisabled = isBusy || !isReady || !isConfigured;
+
+  return (
+    <div className="flex min-w-0 shrink-0 items-center gap-2">
+      {user ? (
+        <div className="hidden min-w-0 text-right sm:block">
+          <p className="truncate text-[13px] font-semibold leading-4 text-neutral-900">
+            {user.email ?? "ログイン中"}
+          </p>
+          <p className="text-[12px] leading-4 text-neutral-500">投稿はローカル保存</p>
+        </div>
+      ) : status ? (
+        <p className="hidden max-w-36 truncate text-right text-[12px] leading-4 text-neutral-500 sm:block">
+          {status}
+        </p>
+      ) : null}
+
+      {user ? (
+        <button
+          className="h-9 rounded-full border border-neutral-200 px-4 text-[14px] font-bold text-neutral-800 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={isBusy}
+          onClick={onSignOut}
+          type="button"
+        >
+          ログアウト
+        </button>
+      ) : (
+        <button
+          className="h-9 rounded-full px-4 text-[14px] font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={isDisabled}
+          onClick={onSignIn}
+          style={{ backgroundColor: isDisabled ? "#f5b8cf" : PINK }}
+          type="button"
+        >
+          {isReady ? "Googleでログイン" : "確認中"}
+        </button>
+      )}
     </div>
   );
 }
