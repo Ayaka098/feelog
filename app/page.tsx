@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   ChangeEvent,
   FormEvent,
@@ -56,6 +57,8 @@ import {
 
 const PINK = "#f8a9c8";
 const PINK_HOVER = "#f48bb5";
+const HEADER_LOGO_SRC = "/ロゴ_ヘッダー用.png";
+const APP_ICON_SRC = "/ロゴ_ファビコン用.png";
 const isSupabaseConfigured = hasSupabaseBrowserConfig();
 const isDevelopment = process.env.NODE_ENV !== "production";
 type ToolTab = "profile" | "search" | "export";
@@ -719,8 +722,15 @@ export default function Home() {
 
         <main className="min-h-screen border-x border-neutral-200 bg-white" id="top">
           <header className="sticky top-0 z-30 flex min-h-[53px] items-center justify-between gap-3 border-b border-neutral-200 bg-white/90 px-4 py-2 backdrop-blur-md">
-            <div>
-              <h1 className="text-xl font-bold leading-6 tracking-normal">feelog</h1>
+            <div className="min-w-0">
+              <Image
+                alt="feelog"
+                className="block h-6 w-auto max-w-[120px] object-contain sm:h-7 sm:max-w-[144px]"
+                height={393}
+                priority
+                src={HEADER_LOGO_SRC}
+                width={1263}
+              />
               <p className="text-[13px] leading-4 text-neutral-500">感情の備忘録</p>
             </div>
             <AuthControls
@@ -972,8 +982,15 @@ function AppRail() {
   return (
     <aside className="sticky top-0 hidden h-screen flex-col justify-between px-3 py-3 md:flex">
       <div className="space-y-2">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full text-[22px] font-black text-neutral-950 md:mx-auto xl:mx-0">
-          f
+        <div className="flex h-12 w-12 items-center justify-center rounded-full md:mx-auto xl:mx-0">
+          <Image
+            alt="feelog"
+            className="h-7 w-auto max-w-8 object-contain"
+            height={1024}
+            priority
+            src={APP_ICON_SRC}
+            width={1536}
+          />
         </div>
         <nav className="space-y-1 text-[17px] font-semibold">
           <a

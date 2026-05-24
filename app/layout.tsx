@@ -4,6 +4,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "feelog",
   description: "感情の備忘録",
+  icons: {
+    icon: [{ url: "/ロゴ_ファビコン用.png", type: "image/png" }],
+    apple: [{ url: "/ロゴ_ファビコン用.png", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({
