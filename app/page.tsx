@@ -99,10 +99,12 @@ export default function Home() {
   const [isFetchingPosts, setIsFetchingPosts] = useState(false);
   const [isMutatingPost, setIsMutatingPost] = useState(false);
   const [activeTool, setActiveTool] = useState<ToolTab>("home");
+  const [renderedPanelTool, setRenderedPanelTool] = useState<ToolTab>("home");
   const [visibleCount, setVisibleCount] = useState(TIMELINE_PAGE_SIZE);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const loadMoreTimerRef = useRef<number | null>(null);
+  const panelCloseTimerRef = useRef<number | null>(null);
   const isSupabasePostsMode = isSupabaseConfigured && authReady && Boolean(authUser);
 
   useEffect(() => {
@@ -157,6 +159,14 @@ export default function Home() {
     return () => {
       isActive = false;
       subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (panelCloseTimerRef.current !== null) {
+        window.clearTimeout(panelCloseTimerRef.current);
+      }
     };
   }, []);
 
@@ -310,6 +320,8 @@ export default function Home() {
     [filteredPosts, isSupabasePostsMode, visibleCount],
   );
   const displayedTotal = isSupabasePostsMode ? totalPosts : filteredPosts.length;
+  const hasTimelineFilters =
+    query.trim().length > 0 || Boolean(fromDate) || Boolean(toDate);
   const hasMorePosts = isSupabasePostsMode
     ? posts.length < totalPosts
     : visibleCount < filteredPosts.length;
@@ -419,6 +431,15 @@ export default function Home() {
 
   function handleToDateChange(value: string) {
     setToDate(value);
+    resetTimelineWindow();
+  }
+
+  function clearTimelineFilters() {
+    setQuery("");
+    setFromDate("");
+    setToDate("");
+    setTimelineStatus("");
+    setDebugError("");
     resetTimelineWindow();
   }
 
@@ -717,26 +738,59 @@ export default function Home() {
     window.setTimeout(() => setCopyState("idle"), 1800);
   }
 
-  const hasActiveSidePanel = activeTool !== "home";
+  function clearPanelCloseTimer() {
+    if (panelCloseTimerRef.current === null) return;
+    window.clearTimeout(panelCloseTimerRef.current);
+    panelCloseTimerRef.current = null;
+  }
+
+  function handleToolChange(tool: ToolTab) {
+    clearPanelCloseTimer();
+    setActiveTool(tool);
+
+    if (tool === "home") {
+      clearTimelineFilters();
+
+      if (renderedPanelTool === "home") return;
+
+      panelCloseTimerRef.current = window.setTimeout(() => {
+        setRenderedPanelTool("home");
+        panelCloseTimerRef.current = null;
+      }, 340);
+      return;
+    }
+
+    setRenderedPanelTool(tool);
+  }
+
+  const hasRenderedSidePanel = renderedPanelTool !== "home";
+  const isPanelExiting = activeTool === "home" && hasRenderedSidePanel;
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-white text-neutral-950">
       <div
         className="mx-auto grid min-h-screen w-full min-w-0 max-w-[1100px] grid-cols-1 md:grid-cols-[88px_minmax(0,620px)] xl:grid-cols-[176px_minmax(0,600px)_minmax(0,324px)]"
       >
-        <AppRail activeTool={activeTool} onToolChange={setActiveTool} />
+        <AppRail activeTool={activeTool} onToolChange={handleToolChange} />
 
         <main className="min-h-screen min-w-0 border-x border-neutral-200 bg-white" id="top">
           <header className="sticky top-0 z-30 flex min-h-[52px] items-center justify-between gap-3 border-b border-neutral-200 bg-white/90 px-4 py-2 backdrop-blur-md">
             <div className="flex min-w-0 items-center">
-              <Image
-                alt="feelog"
-                className="block h-9 w-auto max-w-[132px] object-contain"
-                height={300}
-                priority
-                src={HEADER_LOGO_SRC}
-                width={760}
-              />
+              <a
+                aria-label="ホームへ戻る"
+                className="block min-w-0 rounded-sm transition-opacity hover:opacity-80"
+                href="#top"
+                onClick={() => handleToolChange("home")}
+              >
+                <Image
+                  alt="feelog"
+                  className="block h-9 w-auto max-w-[132px] object-contain"
+                  height={300}
+                  priority
+                  src={HEADER_LOGO_SRC}
+                  width={760}
+                />
+              </a>
             </div>
             <AuthControls
               isBusy={isAuthBusy}
@@ -766,19 +820,23 @@ export default function Home() {
               authStatus={authStatus}
               authUser={authUser}
               copyState={copyState}
+              displayTool={renderedPanelTool}
               exportFromDate={exportFromDate}
               exportText={exportText}
               exportToDate={exportToDate}
               fromDate={fromDate}
+              hasTimelineFilters={hasTimelineFilters}
               idPrefix="mobile"
               isAuthBusy={isAuthBusy}
+              isPanelClosing={isPanelExiting}
+              onClearTimelineFilters={clearTimelineFilters}
               onCopy={copyExportText}
               onProfileAvatarChange={handleProfileAvatarChange}
               onProfileAvatarClear={clearProfileAvatar}
               onProfileDisplayNameChange={updateProfileDisplayName}
               onProfileHandleChange={updateProfileHandle}
               onSignOut={signOut}
-              onToolChange={setActiveTool}
+              onToolChange={handleToolChange}
               profile={profile}
               profileStatus={profileStatus}
               query={query}
@@ -851,7 +909,7 @@ export default function Home() {
           </section>
         </main>
 
-        {hasActiveSidePanel ? (
+        {hasRenderedSidePanel ? (
           <aside className="hidden min-w-0 overflow-hidden xl:block">
             <div className="sticky top-0 max-h-screen min-w-0 overflow-y-auto overflow-x-hidden px-4 py-3">
               <ToolsPanel
@@ -859,19 +917,23 @@ export default function Home() {
                 authStatus={authStatus}
                 authUser={authUser}
                 copyState={copyState}
+                displayTool={renderedPanelTool}
                 exportFromDate={exportFromDate}
                 exportText={exportText}
                 exportToDate={exportToDate}
                 fromDate={fromDate}
+                hasTimelineFilters={hasTimelineFilters}
                 idPrefix="desktop"
                 isAuthBusy={isAuthBusy}
+                isPanelClosing={isPanelExiting}
+                onClearTimelineFilters={clearTimelineFilters}
                 onCopy={copyExportText}
                 onProfileAvatarChange={handleProfileAvatarChange}
                 onProfileAvatarClear={clearProfileAvatar}
                 onProfileDisplayNameChange={updateProfileDisplayName}
                 onProfileHandleChange={updateProfileHandle}
                 onSignOut={signOut}
-                onToolChange={setActiveTool}
+                onToolChange={handleToolChange}
                 profile={profile}
                 profileStatus={profileStatus}
                 query={query}
@@ -1413,12 +1475,16 @@ function ToolsPanel({
   authStatus,
   authUser,
   copyState,
+  displayTool,
   exportFromDate,
   exportText,
   exportToDate,
   fromDate,
+  hasTimelineFilters,
   idPrefix,
   isAuthBusy,
+  isPanelClosing,
+  onClearTimelineFilters,
   onCopy,
   onProfileAvatarChange,
   onProfileAvatarClear,
@@ -1441,12 +1507,16 @@ function ToolsPanel({
   authStatus: string;
   authUser: User | null;
   copyState: "idle" | "copied" | "failed";
+  displayTool: ToolTab;
   exportFromDate: string;
   exportText: string;
   exportToDate: string;
   fromDate: string;
+  hasTimelineFilters: boolean;
   idPrefix: string;
   isAuthBusy: boolean;
+  isPanelClosing: boolean;
+  onClearTimelineFilters: () => void;
   onCopy: () => void;
   onProfileAvatarChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onProfileAvatarClear: () => void;
@@ -1473,12 +1543,19 @@ function ToolsPanel({
         : "コピー";
   const tabs: { id: ToolTab; label: string }[] = [
     { id: "search", label: "検索" },
-    { id: "export", label: "AI出力" },
+    { id: "export", label: "出力" },
     { id: "settings", label: "設定" },
   ];
   const showTabs = idPrefix === "mobile";
   const sectionClassName = showTabs ? "mt-4" : "";
-  const panelTransitionClassName = `${sectionClassName} feelog-panel-transition`;
+  const panelMotionClassName = isPanelClosing
+    ? "feelog-panel-transition feelog-panel-transition-out"
+    : "feelog-panel-transition feelog-panel-transition-in";
+  const panelTransitionClassName = `${sectionClassName} ${panelMotionClassName}`;
+  const panelBodyShellClassName =
+    displayTool === "home" || isPanelClosing
+      ? "feelog-panel-body-shell feelog-panel-body-shell-out"
+      : "feelog-panel-body-shell feelog-panel-body-shell-in";
 
   return (
     <div className="min-w-0 px-4 py-3 xl:px-0 xl:py-0" id={`${idPrefix}-tools`}>
@@ -1512,116 +1589,133 @@ function ToolsPanel({
         </div>
       ) : null}
 
-      {activeTool === "settings" ? (
-        <ProfilePanel
-          authStatus={authStatus}
-          authUser={authUser}
-          className={panelTransitionClassName}
-          idPrefix={idPrefix}
-          isAuthBusy={isAuthBusy}
-          key={`${idPrefix}-settings-panel`}
-          onAvatarChange={onProfileAvatarChange}
-          onAvatarClear={onProfileAvatarClear}
-          onDisplayNameChange={onProfileDisplayNameChange}
-          onHandleChange={onProfileHandleChange}
-          onSignOut={onSignOut}
-          profile={profile}
-          status={profileStatus}
-        />
-      ) : null}
-
-      {activeTool === "search" ? (
-        <section
-          aria-labelledby={`${idPrefix}-search-title`}
-          className={panelTransitionClassName}
-          id={`${idPrefix}-search`}
-          key={`${idPrefix}-search-panel`}
-        >
-          <h2
-            className="mb-3 text-[20px] font-extrabold tracking-normal"
-            id={`${idPrefix}-search-title`}
-          >
-            検索
-          </h2>
-          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
-            <label className="sr-only" htmlFor={`${idPrefix}-keyword`}>
-              キーワード
-            </label>
-            <input
-              className="h-11 w-full rounded-full border border-transparent bg-white px-4 text-[15px] outline-none transition focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
-              id={`${idPrefix}-keyword`}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="検索"
-              type="search"
-              value={query}
+      <div
+        aria-hidden={displayTool === "home" || isPanelClosing ? true : undefined}
+        className={panelBodyShellClassName}
+      >
+        <div className="feelog-panel-body-inner">
+          {displayTool === "settings" ? (
+            <ProfilePanel
+              authStatus={authStatus}
+              authUser={authUser}
+              className={panelTransitionClassName}
+              idPrefix={idPrefix}
+              isAuthBusy={isAuthBusy}
+              key={`${idPrefix}-settings-panel`}
+              onAvatarChange={onProfileAvatarChange}
+              onAvatarClear={onProfileAvatarClear}
+              onDisplayNameChange={onProfileDisplayNameChange}
+              onHandleChange={onProfileHandleChange}
+              onSignOut={onSignOut}
+              profile={profile}
+              status={profileStatus}
             />
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
-              <DateField
-                id={`${idPrefix}-from`}
-                label="開始日"
-                onChange={setFromDate}
-                value={fromDate}
-              />
-              <DateField
-                id={`${idPrefix}-to`}
-                label="終了日"
-                onChange={setToDate}
-                value={toDate}
-              />
-            </div>
-            <p className="mt-3 text-[13px] font-medium text-neutral-500">
-              {resultCount}件
-            </p>
-          </div>
-        </section>
-      ) : null}
+          ) : null}
 
-      {activeTool === "export" ? (
-        <section
-          aria-labelledby={`${idPrefix}-export-title`}
-          className={panelTransitionClassName}
-          id={`${idPrefix}-export`}
-          key={`${idPrefix}-export-panel`}
-        >
-          <div className="mb-3 flex items-center justify-between">
-            <h2
-              className="text-[20px] font-extrabold tracking-normal"
-              id={`${idPrefix}-export-title`}
+          {displayTool === "search" ? (
+            <section
+              aria-labelledby={`${idPrefix}-search-title`}
+              className={panelTransitionClassName}
+              id={`${idPrefix}-search`}
+              key={`${idPrefix}-search-panel`}
             >
-              AI出力
-            </h2>
-            <button
-              className="h-9 rounded-full bg-[#f8a9c8] px-4 text-[14px] font-bold text-white transition-colors hover:bg-[#f48bb5] disabled:cursor-not-allowed disabled:bg-[#f5b8cf] disabled:opacity-50 disabled:hover:bg-[#f5b8cf]"
-              disabled={!exportText}
-              onClick={onCopy}
-              type="button"
+              <h2
+                className="mb-3 text-[20px] font-extrabold tracking-normal"
+                id={`${idPrefix}-search-title`}
+              >
+                検索
+              </h2>
+              <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
+                <label className="sr-only" htmlFor={`${idPrefix}-keyword`}>
+                  キーワード
+                </label>
+                <input
+                  className="h-11 w-full rounded-full border border-transparent bg-white px-4 text-[15px] outline-none transition focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
+                  id={`${idPrefix}-keyword`}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="検索"
+                  type="search"
+                  value={query}
+                />
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                  <DateField
+                    id={`${idPrefix}-from`}
+                    label="開始日"
+                    onChange={setFromDate}
+                    value={fromDate}
+                  />
+                  <DateField
+                    id={`${idPrefix}-to`}
+                    label="終了日"
+                    onChange={setToDate}
+                    value={toDate}
+                  />
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[13px] font-medium text-neutral-500">
+                    {hasTimelineFilters ? "絞り込み中" : "すべて表示"} · {resultCount}件
+                  </p>
+                  <button
+                    className="h-8 rounded-full px-3 text-[13px] font-bold text-neutral-600 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                    disabled={!hasTimelineFilters}
+                    onClick={onClearTimelineFilters}
+                    type="button"
+                  >
+                    絞り込みを解除
+                  </button>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {displayTool === "export" ? (
+            <section
+              aria-labelledby={`${idPrefix}-export-title`}
+              className={panelTransitionClassName}
+              id={`${idPrefix}-export`}
+              key={`${idPrefix}-export-panel`}
             >
-              {copyLabel}
-            </button>
-          </div>
-          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
-              <DateField
-                id={`${idPrefix}-export-from`}
-                label="開始日"
-                onChange={setExportFromDate}
-                value={exportFromDate}
-              />
-              <DateField
-                id={`${idPrefix}-export-to`}
-                label="終了日"
-                onChange={setExportToDate}
-                value={exportToDate}
-              />
-            </div>
-            <textarea
-              className="mt-3 min-h-44 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 font-mono text-[12px] leading-5 text-neutral-800 outline-none focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
-              readOnly
-              value={exportText}
-            />
-          </div>
-        </section>
-      ) : null}
+              <div className="mb-3 flex items-center justify-between">
+                <h2
+                  className="text-[20px] font-extrabold tracking-normal"
+                  id={`${idPrefix}-export-title`}
+                >
+                  AI出力
+                </h2>
+                <button
+                  className="h-9 rounded-full bg-[#f8a9c8] px-4 text-[14px] font-bold text-white transition-colors hover:bg-[#f48bb5] disabled:cursor-not-allowed disabled:bg-[#f5b8cf] disabled:opacity-50 disabled:hover:bg-[#f5b8cf]"
+                  disabled={!exportText}
+                  onClick={onCopy}
+                  type="button"
+                >
+                  {copyLabel}
+                </button>
+              </div>
+              <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                  <DateField
+                    id={`${idPrefix}-export-from`}
+                    label="開始日"
+                    onChange={setExportFromDate}
+                    value={exportFromDate}
+                  />
+                  <DateField
+                    id={`${idPrefix}-export-to`}
+                    label="終了日"
+                    onChange={setExportToDate}
+                    value={exportToDate}
+                  />
+                </div>
+                <textarea
+                  className="mt-3 min-h-44 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 font-mono text-[12px] leading-5 text-neutral-800 outline-none focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
+                  readOnly
+                  value={exportText}
+                />
+              </div>
+            </section>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1739,7 +1833,7 @@ function ProfilePanel({
             className="flex h-9 cursor-pointer items-center rounded-full bg-white px-3 text-[13px] font-bold text-neutral-700 transition-colors hover:bg-pink-50"
             style={{ color: PINK_HOVER }}
           >
-            画像を選ぶ
+            アイコン画像を変更
             <input
               accept="image/*"
               className="sr-only"

@@ -36,26 +36,83 @@ html {
 }
 
 .feelog-panel-transition {
-  animation: feelog-panel-in 100ms ease-out both;
+  backface-visibility: hidden;
+  transform-origin: top center;
+  will-change: opacity, transform, filter;
+}
+
+.feelog-panel-transition-in {
+  animation: feelog-panel-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.feelog-panel-transition-out {
+  animation: feelog-panel-out 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  pointer-events: none;
+}
+
+.feelog-panel-body-shell {
+  display: grid;
+  transition: grid-template-rows 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.feelog-panel-body-shell-in {
+  grid-template-rows: 1fr;
+}
+
+.feelog-panel-body-shell-out {
+  grid-template-rows: 0fr;
+}
+
+.feelog-panel-body-inner {
+  min-height: 0;
+  overflow: hidden;
 }
 
 @keyframes feelog-panel-in {
   from {
-    opacity: 0;
-    transform: translateY(2px);
-    filter: blur(1px);
+    opacity: 0.35;
+    transform: translateY(6px) scale(0.985);
+    filter: blur(2px);
   }
 
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
     filter: blur(0);
+  }
+}
+
+@keyframes feelog-panel-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.992);
+    filter: blur(1.5px);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .feelog-panel-transition {
     animation: none;
+    filter: none;
+    transform: none;
+  }
+
+  .feelog-panel-body-shell {
+    transition: none;
+  }
+
+  .feelog-panel-transition-in {
+    opacity: 1;
+  }
+
+  .feelog-panel-transition-out {
+    opacity: 0;
   }
 }
 
