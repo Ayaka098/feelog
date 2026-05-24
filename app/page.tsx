@@ -58,10 +58,11 @@ import {
 const PINK = "#f8a9c8";
 const PINK_HOVER = "#f48bb5";
 const HEADER_LOGO_SRC = "/ロゴ_ヘッダー用.png";
-const APP_ICON_SRC = "/ロゴ_ファビコン用.png";
+const APP_ICON_SRC = "/favicon.png";
 const isSupabaseConfigured = hasSupabaseBrowserConfig();
 const isDevelopment = process.env.NODE_ENV !== "production";
 type ToolTab = "profile" | "search" | "export";
+type RailIconName = "home" | "search" | "export";
 
 export default function Home() {
   const [posts, setPosts] = useState<Post[]>(
@@ -716,22 +717,21 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-neutral-950">
-      <div className="mx-auto grid min-h-screen max-w-6xl grid-cols-1 md:grid-cols-[88px_minmax(0,620px)] xl:grid-cols-[180px_minmax(0,620px)_350px]">
+    <div className="min-h-screen overflow-x-hidden bg-white text-neutral-950">
+      <div className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 md:grid-cols-[88px_minmax(0,620px)] xl:grid-cols-[180px_minmax(0,620px)_350px]">
         <AppRail />
 
-        <main className="min-h-screen border-x border-neutral-200 bg-white" id="top">
-          <header className="sticky top-0 z-30 flex min-h-[53px] items-center justify-between gap-3 border-b border-neutral-200 bg-white/90 px-4 py-2 backdrop-blur-md">
-            <div className="min-w-0">
+        <main className="min-w-0 min-h-screen border-x border-neutral-200 bg-white" id="top">
+          <header className="sticky top-0 z-30 flex min-h-[52px] items-center justify-between gap-3 border-b border-neutral-200 bg-white/90 px-4 py-2 backdrop-blur-md">
+            <div className="flex min-w-0 items-center">
               <Image
                 alt="feelog"
-                className="block h-6 w-auto max-w-[120px] object-contain sm:h-7 sm:max-w-[144px]"
+                className="block h-8 w-auto max-w-[136px] object-contain sm:max-w-[152px]"
                 height={393}
                 priority
                 src={HEADER_LOGO_SRC}
                 width={1263}
               />
-              <p className="text-[13px] leading-4 text-neutral-500">感情の備忘録</p>
             </div>
             <AuthControls
               isBusy={isAuthBusy}
@@ -942,23 +942,11 @@ function AuthControls({
   return (
     <div className="flex min-w-0 shrink-0 items-center gap-2">
       {user ? (
-        <div className="hidden min-w-0 text-right sm:block">
-          <p className="truncate text-[13px] font-semibold leading-4 text-neutral-900">
-            {user.email ?? "ログイン中"}
-          </p>
-          <p className="text-[12px] leading-4 text-neutral-500">投稿はSupabase保存</p>
-        </div>
-      ) : status ? (
-        <p className="hidden max-w-36 truncate text-right text-[12px] leading-4 text-neutral-500 sm:block">
-          {status}
-        </p>
-      ) : null}
-
-      {user ? (
         <button
           className="h-9 rounded-full border border-neutral-200 px-4 text-[14px] font-bold text-neutral-800 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={isBusy}
           onClick={onSignOut}
+          title={status || undefined}
           type="button"
         >
           ログアウト
@@ -969,6 +957,7 @@ function AuthControls({
           disabled={isDisabled}
           onClick={onSignIn}
           style={{ backgroundColor: isDisabled ? "#f5b8cf" : PINK }}
+          title={status || undefined}
           type="button"
         >
           {isReady ? "Googleでログイン" : "確認中"}
@@ -980,71 +969,118 @@ function AuthControls({
 
 function AppRail() {
   return (
-    <aside className="sticky top-0 hidden h-screen flex-col justify-between px-3 py-3 md:flex">
-      <div className="space-y-2">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full md:mx-auto xl:mx-0">
+    <aside className="sticky top-0 hidden h-screen min-w-0 flex-col justify-between px-3 py-2 md:flex">
+      <div className="space-y-3">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full md:mx-auto xl:mx-0">
           <Image
             alt="feelog"
-            className="h-7 w-auto max-w-8 object-contain"
-            height={1024}
+            className="h-12 w-12 object-contain"
+            height={512}
             priority
             src={APP_ICON_SRC}
-            width={1536}
+            width={512}
           />
         </div>
         <nav className="space-y-1 text-[17px] font-semibold">
-          <a
-            className="flex h-12 items-center gap-4 rounded-full px-3 transition-colors hover:bg-pink-50"
-            href="#top"
-          >
-            <span aria-hidden="true" className="text-xl">
-              ⌂
-            </span>
-            <span className="hidden xl:inline">ホーム</span>
-          </a>
-          <a
-            className="flex h-12 items-center gap-4 rounded-full px-3 transition-colors hover:bg-pink-50 xl:hidden"
-            href="#mobile-tools"
-          >
-            <span aria-hidden="true" className="text-xl">
-              ⌕
-            </span>
-            <span className="hidden xl:inline">検索</span>
-          </a>
-          <a
-            className="hidden h-12 items-center gap-4 rounded-full px-3 transition-colors hover:bg-pink-50 xl:flex"
-            href="#desktop-tools"
-          >
-            <span aria-hidden="true" className="text-xl">
-              ⌕
-            </span>
-            <span className="hidden xl:inline">検索</span>
-          </a>
-          <a
-            className="flex h-12 items-center gap-4 rounded-full px-3 transition-colors hover:bg-pink-50 xl:hidden"
-            href="#mobile-tools"
-          >
-            <span aria-hidden="true" className="text-xl">
-              ⇪
-            </span>
-            <span className="hidden xl:inline">出力</span>
-          </a>
-          <a
-            className="hidden h-12 items-center gap-4 rounded-full px-3 transition-colors hover:bg-pink-50 xl:flex"
-            href="#desktop-tools"
-          >
-            <span aria-hidden="true" className="text-xl">
-              ⇪
-            </span>
-            <span className="hidden xl:inline">出力</span>
-          </a>
+          <RailLink href="#top" icon="home" label="ホーム" />
+          <RailLink className="xl:hidden" href="#mobile-tools" icon="search" label="検索" />
+          <RailLink className="hidden xl:grid" href="#desktop-tools" icon="search" label="検索" />
+          <RailLink className="xl:hidden" href="#mobile-tools" icon="export" label="出力" />
+          <RailLink className="hidden xl:grid" href="#desktop-tools" icon="export" label="出力" />
         </nav>
       </div>
-      <div className="hidden rounded-full border border-neutral-200 px-3 py-2 xl:block">
-        <p className="text-[13px] font-semibold leading-4">ローカルMVP</p>
-        <p className="text-[12px] leading-4 text-neutral-500">同期なし</p>
-      </div>
+      <a
+        className="hidden h-10 items-center rounded-full border border-neutral-200 px-4 text-[14px] font-semibold text-neutral-700 transition-colors hover:bg-pink-50 xl:flex"
+        href="#desktop-tools"
+      >
+        設定
+      </a>
     </aside>
+  );
+}
+
+function RailLink({
+  className = "",
+  href,
+  icon,
+  label,
+}: {
+  className?: string;
+  href: string;
+  icon: RailIconName;
+  label: string;
+}) {
+  return (
+    <a
+      className={`flex h-12 items-center justify-center rounded-full px-3 text-neutral-900 transition-colors hover:bg-pink-50 xl:grid xl:grid-cols-[28px_minmax(0,1fr)] xl:justify-start xl:gap-4 ${className}`}
+      href={href}
+    >
+      <span
+        aria-hidden="true"
+        className="flex h-7 w-7 items-center justify-center text-neutral-950"
+      >
+        <RailIcon name={icon} />
+      </span>
+      <span className="hidden min-w-0 truncate xl:inline">{label}</span>
+    </a>
+  );
+}
+
+function RailIcon({ name }: { name: RailIconName }) {
+  const iconClass = "h-[22px] w-[22px]";
+
+  if (name === "home") {
+    return (
+      <svg
+        aria-hidden="true"
+        className={iconClass}
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+        viewBox="0 0 24 24"
+      >
+        <path d="M3.5 10.8 12 4l8.5 6.8" />
+        <path d="M5.5 9.8V20h13V9.8" />
+        <path d="M9.5 20v-6h5v6" />
+      </svg>
+    );
+  }
+
+  if (name === "search") {
+    return (
+      <svg
+        aria-hidden="true"
+        className={iconClass}
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+        viewBox="0 0 24 24"
+      >
+        <circle cx="10.8" cy="10.8" r="6.3" />
+        <path d="m16 16 4.2 4.2" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      aria-hidden="true"
+      className={iconClass}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M12 4v10" />
+      <path d="m8.5 7.5 3.5-3.5 3.5 3.5" />
+      <path d="M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14" />
+    </svg>
   );
 }
 
@@ -1082,7 +1118,7 @@ function Composer({
 
   return (
     <form
-      className="sticky top-[53px] z-20 border-b border-neutral-200 bg-white/95 px-4 pt-3 backdrop-blur-md"
+      className="sticky top-[52px] z-20 border-b border-neutral-200 bg-white/95 px-4 pt-3 backdrop-blur-md"
       onSubmit={onSubmit}
     >
       <div className="flex gap-3">
@@ -1250,14 +1286,13 @@ function PostItem({
             </>
           )}
 
-          <div className="mt-3 flex max-w-xs items-center justify-between text-[14px] text-neutral-500">
+          <div className="mt-3 flex items-center text-[14px] text-neutral-500">
             <div className="flex items-center gap-2">
               <span aria-hidden="true" className="text-[17px]" style={{ color: PINK_HOVER }}>
                 ♡
               </span>
               <span>{hearts}</span>
             </div>
-            <span className="text-[13px] text-neutral-400">private</span>
           </div>
         </div>
       </div>
