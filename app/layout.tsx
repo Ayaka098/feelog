@@ -5,8 +5,8 @@ export const metadata: Metadata = {
   title: "feelog",
   description: "感情の備忘録",
   icons: {
-    icon: [{ url: "/favicon.png", sizes: "512x512", type: "image/png" }],
-    apple: [{ url: "/favicon.png", sizes: "512x512", type: "image/png" }],
+    icon: [{ url: "/feelog-logo-favicon.png", sizes: "512x512", type: "image/png" }],
+    apple: [{ url: "/feelog-logo-favicon.png", sizes: "512x512", type: "image/png" }],
   },
 };
 

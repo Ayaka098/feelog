@@ -57,12 +57,12 @@ import {
 
 const PINK = "#f8a9c8";
 const PINK_HOVER = "#f48bb5";
-const HEADER_LOGO_SRC = "/ロゴ_ヘッダー用.png";
-const APP_ICON_SRC = "/favicon.png";
+const HEADER_LOGO_SRC = "/feelog-logo-header-v2.png";
+const APP_ICON_SRC = "/feelog-logo-favicon.png";
 const isSupabaseConfigured = hasSupabaseBrowserConfig();
 const isDevelopment = process.env.NODE_ENV !== "production";
-type ToolTab = "profile" | "search" | "export";
-type RailIconName = "home" | "search" | "export";
+type ToolTab = "home" | "search" | "export" | "settings";
+type RailIconName = ToolTab;
 
 export default function Home() {
   const [posts, setPosts] = useState<Post[]>(
@@ -98,6 +98,7 @@ export default function Home() {
   const [debugError, setDebugError] = useState("");
   const [isFetchingPosts, setIsFetchingPosts] = useState(false);
   const [isMutatingPost, setIsMutatingPost] = useState(false);
+  const [activeTool, setActiveTool] = useState<ToolTab>("home");
   const [visibleCount, setVisibleCount] = useState(TIMELINE_PAGE_SIZE);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -716,21 +717,25 @@ export default function Home() {
     window.setTimeout(() => setCopyState("idle"), 1800);
   }
 
-  return (
-    <div className="min-h-screen overflow-x-hidden bg-white text-neutral-950">
-      <div className="mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 md:grid-cols-[88px_minmax(0,620px)] xl:grid-cols-[180px_minmax(0,620px)_350px]">
-        <AppRail />
+  const hasActiveSidePanel = activeTool !== "home";
 
-        <main className="min-w-0 min-h-screen border-x border-neutral-200 bg-white" id="top">
+  return (
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-white text-neutral-950">
+      <div
+        className="mx-auto grid min-h-screen w-full min-w-0 max-w-[1100px] grid-cols-1 md:grid-cols-[88px_minmax(0,620px)] xl:grid-cols-[176px_minmax(0,600px)_minmax(0,324px)]"
+      >
+        <AppRail activeTool={activeTool} onToolChange={setActiveTool} />
+
+        <main className="min-h-screen min-w-0 border-x border-neutral-200 bg-white" id="top">
           <header className="sticky top-0 z-30 flex min-h-[52px] items-center justify-between gap-3 border-b border-neutral-200 bg-white/90 px-4 py-2 backdrop-blur-md">
             <div className="flex min-w-0 items-center">
               <Image
                 alt="feelog"
-                className="block h-8 w-auto max-w-[136px] object-contain sm:max-w-[152px]"
-                height={393}
+                className="block h-9 w-auto max-w-[132px] object-contain"
+                height={300}
                 priority
                 src={HEADER_LOGO_SRC}
-                width={1263}
+                width={760}
               />
             </div>
             <AuthControls
@@ -738,7 +743,6 @@ export default function Home() {
               isConfigured={isSupabaseConfigured}
               isReady={authReady}
               onSignIn={signInWithGoogle}
-              onSignOut={signOut}
               status={authStatus}
               user={authUser}
             />
@@ -757,23 +761,29 @@ export default function Home() {
           />
 
           <div className="border-b border-neutral-200 xl:hidden">
-              <ToolsPanel
-                copyState={copyState}
-                exportFromDate={exportFromDate}
-                exportText={exportText}
-                exportToDate={exportToDate}
-                fromDate={fromDate}
-                idPrefix="mobile"
-                onCopy={copyExportText}
-                onProfileAvatarChange={handleProfileAvatarChange}
-                onProfileAvatarClear={clearProfileAvatar}
-                onProfileDisplayNameChange={updateProfileDisplayName}
-                onProfileHandleChange={updateProfileHandle}
-                profile={profile}
-                profileStatus={profileStatus}
-                query={query}
-                resultCount={displayedTotal}
-                setExportFromDate={setExportFromDate}
+            <ToolsPanel
+              activeTool={activeTool}
+              authStatus={authStatus}
+              authUser={authUser}
+              copyState={copyState}
+              exportFromDate={exportFromDate}
+              exportText={exportText}
+              exportToDate={exportToDate}
+              fromDate={fromDate}
+              idPrefix="mobile"
+              isAuthBusy={isAuthBusy}
+              onCopy={copyExportText}
+              onProfileAvatarChange={handleProfileAvatarChange}
+              onProfileAvatarClear={clearProfileAvatar}
+              onProfileDisplayNameChange={updateProfileDisplayName}
+              onProfileHandleChange={updateProfileHandle}
+              onSignOut={signOut}
+              onToolChange={setActiveTool}
+              profile={profile}
+              profileStatus={profileStatus}
+              query={query}
+              resultCount={displayedTotal}
+              setExportFromDate={setExportFromDate}
               setExportToDate={setExportToDate}
               setFromDate={handleFromDateChange}
               setQuery={handleQueryChange}
@@ -841,33 +851,41 @@ export default function Home() {
           </section>
         </main>
 
-        <aside className="hidden xl:block">
-          <div className="sticky top-0 max-h-screen overflow-y-auto px-5 py-3">
+        {hasActiveSidePanel ? (
+          <aside className="hidden min-w-0 overflow-hidden xl:block">
+            <div className="sticky top-0 max-h-screen min-w-0 overflow-y-auto overflow-x-hidden px-4 py-3">
               <ToolsPanel
+                activeTool={activeTool}
+                authStatus={authStatus}
+                authUser={authUser}
                 copyState={copyState}
                 exportFromDate={exportFromDate}
                 exportText={exportText}
                 exportToDate={exportToDate}
                 fromDate={fromDate}
                 idPrefix="desktop"
+                isAuthBusy={isAuthBusy}
                 onCopy={copyExportText}
                 onProfileAvatarChange={handleProfileAvatarChange}
                 onProfileAvatarClear={clearProfileAvatar}
                 onProfileDisplayNameChange={updateProfileDisplayName}
                 onProfileHandleChange={updateProfileHandle}
+                onSignOut={signOut}
+                onToolChange={setActiveTool}
                 profile={profile}
                 profileStatus={profileStatus}
                 query={query}
                 resultCount={displayedTotal}
-              setExportFromDate={setExportFromDate}
-              setExportToDate={setExportToDate}
-              setFromDate={handleFromDateChange}
-              setQuery={handleQueryChange}
-              setToDate={handleToDateChange}
-              toDate={toDate}
-            />
-          </div>
-        </aside>
+                setExportFromDate={setExportFromDate}
+                setExportToDate={setExportToDate}
+                setFromDate={handleFromDateChange}
+                setQuery={handleQueryChange}
+                setToDate={handleToDateChange}
+                toDate={toDate}
+              />
+            </div>
+          </aside>
+        ) : null}
       </div>
     </div>
   );
@@ -925,7 +943,6 @@ function AuthControls({
   isConfigured,
   isReady,
   onSignIn,
-  onSignOut,
   status,
   user,
 }: {
@@ -933,41 +950,36 @@ function AuthControls({
   isConfigured: boolean;
   isReady: boolean;
   onSignIn: () => void;
-  onSignOut: () => void;
   status: string;
   user: User | null;
 }) {
   const isDisabled = isBusy || !isReady || !isConfigured;
 
+  if (user) return null;
+
   return (
     <div className="flex min-w-0 shrink-0 items-center gap-2">
-      {user ? (
-        <button
-          className="h-9 rounded-full border border-neutral-200 px-4 text-[14px] font-bold text-neutral-800 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={isBusy}
-          onClick={onSignOut}
-          title={status || undefined}
-          type="button"
-        >
-          ログアウト
-        </button>
-      ) : (
-        <button
-          className="h-9 rounded-full px-4 text-[14px] font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={isDisabled}
-          onClick={onSignIn}
-          style={{ backgroundColor: isDisabled ? "#f5b8cf" : PINK }}
-          title={status || undefined}
-          type="button"
-        >
-          {isReady ? "Googleでログイン" : "確認中"}
-        </button>
-      )}
+      <button
+        className="h-9 rounded-full px-4 text-[14px] font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={isDisabled}
+        onClick={onSignIn}
+        style={{ backgroundColor: isDisabled ? "#f5b8cf" : PINK }}
+        title={status || undefined}
+        type="button"
+      >
+        {isReady ? "Googleでログイン" : "確認中"}
+      </button>
     </div>
   );
 }
 
-function AppRail() {
+function AppRail({
+  activeTool,
+  onToolChange,
+}: {
+  activeTool: ToolTab;
+  onToolChange: (tool: ToolTab) => void;
+}) {
   return (
     <aside className="sticky top-0 hidden h-screen min-w-0 flex-col justify-between px-3 py-2 md:flex">
       <div className="space-y-3">
@@ -982,38 +994,91 @@ function AppRail() {
           />
         </div>
         <nav className="space-y-1 text-[17px] font-semibold">
-          <RailLink href="#top" icon="home" label="ホーム" />
-          <RailLink className="xl:hidden" href="#mobile-tools" icon="search" label="検索" />
-          <RailLink className="hidden xl:grid" href="#desktop-tools" icon="search" label="検索" />
-          <RailLink className="xl:hidden" href="#mobile-tools" icon="export" label="出力" />
-          <RailLink className="hidden xl:grid" href="#desktop-tools" icon="export" label="出力" />
+          <RailToolLink
+            active={activeTool === "home"}
+            href="#top"
+            icon="home"
+            label="ホーム"
+            onSelect={() => onToolChange("home")}
+          />
+          <RailToolLink
+            active={activeTool === "search"}
+            className="xl:hidden"
+            href="#mobile-tools"
+            icon="search"
+            label="検索"
+            onSelect={() => onToolChange("search")}
+          />
+          <RailToolLink
+            active={activeTool === "search"}
+            className="hidden xl:grid"
+            href="#desktop-tools"
+            icon="search"
+            label="検索"
+            onSelect={() => onToolChange("search")}
+          />
+          <RailToolLink
+            active={activeTool === "export"}
+            className="xl:hidden"
+            href="#mobile-tools"
+            icon="export"
+            label="出力"
+            onSelect={() => onToolChange("export")}
+          />
+          <RailToolLink
+            active={activeTool === "export"}
+            className="hidden xl:grid"
+            href="#desktop-tools"
+            icon="export"
+            label="出力"
+            onSelect={() => onToolChange("export")}
+          />
+          <RailToolLink
+            active={activeTool === "settings"}
+            className="xl:hidden"
+            href="#mobile-tools"
+            icon="settings"
+            label="設定"
+            onSelect={() => onToolChange("settings")}
+          />
+          <RailToolLink
+            active={activeTool === "settings"}
+            className="hidden xl:grid"
+            href="#desktop-tools"
+            icon="settings"
+            label="設定"
+            onSelect={() => onToolChange("settings")}
+          />
         </nav>
       </div>
-      <a
-        className="hidden h-10 items-center rounded-full border border-neutral-200 px-4 text-[14px] font-semibold text-neutral-700 transition-colors hover:bg-pink-50 xl:flex"
-        href="#desktop-tools"
-      >
-        設定
-      </a>
     </aside>
   );
 }
 
-function RailLink({
+function RailToolLink({
+  active,
   className = "",
   href,
   icon,
   label,
+  onSelect,
 }: {
+  active: boolean;
   className?: string;
   href: string;
-  icon: RailIconName;
+  icon: ToolTab;
   label: string;
+  onSelect: () => void;
 }) {
   return (
     <a
-      className={`flex h-12 items-center justify-center rounded-full px-3 text-neutral-900 transition-colors hover:bg-pink-50 xl:grid xl:grid-cols-[28px_minmax(0,1fr)] xl:justify-start xl:gap-4 ${className}`}
+      className={`flex h-12 items-center justify-center rounded-full px-3 transition-colors xl:grid xl:grid-cols-[28px_minmax(0,1fr)] xl:justify-start xl:gap-4 ${
+        active
+          ? "bg-pink-50 text-neutral-950"
+          : "text-neutral-900 hover:bg-pink-50"
+      } ${className}`}
       href={href}
+      onClick={onSelect}
     >
       <span
         aria-hidden="true"
@@ -1066,6 +1131,31 @@ function RailIcon({ name }: { name: RailIconName }) {
     );
   }
 
+  if (name === "settings") {
+    return (
+      <svg
+        aria-hidden="true"
+        className={iconClass}
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+        viewBox="0 0 24 24"
+      >
+        <circle cx="12" cy="12" r="3.25" />
+        <path d="M12 3.8v2.4" />
+        <path d="M12 17.8v2.4" />
+        <path d="m5.9 5.9 1.7 1.7" />
+        <path d="m16.4 16.4 1.7 1.7" />
+        <path d="M3.8 12h2.4" />
+        <path d="M17.8 12h2.4" />
+        <path d="m5.9 18.1 1.7-1.7" />
+        <path d="m16.4 7.6 1.7-1.7" />
+      </svg>
+    );
+  }
+
   return (
     <svg
       aria-hidden="true"
@@ -1080,6 +1170,24 @@ function RailIcon({ name }: { name: RailIconName }) {
       <path d="M12 4v10" />
       <path d="m8.5 7.5 3.5-3.5 3.5 3.5" />
       <path d="M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14" />
+    </svg>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-[19px] w-[19px]"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M8.2 6.5 9.6 4.8h4.8l1.4 1.7H19a2 2 0 0 1 2 2v8.7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8.5a2 2 0 0 1 2-2h3.2Z" />
+      <circle cx="12" cy="12.8" r="3.4" />
     </svg>
   );
 }
@@ -1148,8 +1256,8 @@ function Composer({
                 className="flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full px-3 text-[14px] font-semibold transition-colors hover:bg-pink-50"
                 style={{ color: PINK_HOVER }}
               >
-                <span aria-hidden="true" className="text-[18px] leading-none">
-                  ▧
+                <span aria-hidden="true" className="flex h-5 w-5 items-center justify-center">
+                  <CameraIcon />
                 </span>
                 画像
                 <input
@@ -1301,17 +1409,23 @@ function PostItem({
 }
 
 function ToolsPanel({
+  activeTool,
+  authStatus,
+  authUser,
   copyState,
   exportFromDate,
   exportText,
   exportToDate,
   fromDate,
   idPrefix,
+  isAuthBusy,
   onCopy,
   onProfileAvatarChange,
   onProfileAvatarClear,
   onProfileDisplayNameChange,
   onProfileHandleChange,
+  onSignOut,
+  onToolChange,
   profile,
   profileStatus,
   query,
@@ -1323,17 +1437,23 @@ function ToolsPanel({
   setToDate,
   toDate,
 }: {
+  activeTool: ToolTab;
+  authStatus: string;
+  authUser: User | null;
   copyState: "idle" | "copied" | "failed";
   exportFromDate: string;
   exportText: string;
   exportToDate: string;
   fromDate: string;
   idPrefix: string;
+  isAuthBusy: boolean;
   onCopy: () => void;
   onProfileAvatarChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onProfileAvatarClear: () => void;
   onProfileDisplayNameChange: (value: string) => void;
   onProfileHandleChange: (value: string) => void;
+  onSignOut: () => void;
+  onToolChange: (tool: ToolTab) => void;
   profile: UserProfile;
   profileStatus: string;
   query: string;
@@ -1345,7 +1465,6 @@ function ToolsPanel({
   setToDate: (value: string) => void;
   toDate: string;
 }) {
-  const [activeTab, setActiveTab] = useState<ToolTab | null>(null);
   const copyLabel =
     copyState === "copied"
       ? "コピー済み"
@@ -1353,58 +1472,70 @@ function ToolsPanel({
         ? "失敗"
         : "コピー";
   const tabs: { id: ToolTab; label: string }[] = [
-    { id: "profile", label: "プロフィール" },
     { id: "search", label: "検索" },
     { id: "export", label: "AI出力" },
+    { id: "settings", label: "設定" },
   ];
+  const showTabs = idPrefix === "mobile";
+  const sectionClassName = showTabs ? "mt-4" : "";
+  const panelTransitionClassName = `${sectionClassName} feelog-panel-transition`;
 
   return (
-    <div className="px-4 py-3 xl:px-0 xl:py-0" id={`${idPrefix}-tools`}>
-      <div
-        aria-label="詳細パネル"
-        className="grid grid-cols-3 gap-1 rounded-full bg-neutral-100 p-1"
-        role="tablist"
-      >
-        {tabs.map((tab) => {
-          const isActive = activeTab === tab.id;
+    <div className="min-w-0 px-4 py-3 xl:px-0 xl:py-0" id={`${idPrefix}-tools`}>
+      {showTabs ? (
+        <div
+          aria-label="詳細パネル"
+          className="grid grid-cols-3 gap-1 rounded-full bg-neutral-100 p-1"
+          role="tablist"
+        >
+          {tabs.map((tab) => {
+            const isActive = activeTool === tab.id;
 
-          return (
-            <button
-              aria-controls={`${idPrefix}-${tab.id}`}
-              aria-selected={isActive}
-              className={`h-9 rounded-full px-2 text-[13px] font-bold transition-colors ${
-                isActive
-                  ? "bg-white text-neutral-950 shadow-sm"
-                  : "text-neutral-500 hover:bg-white/70 hover:text-neutral-900"
-              }`}
-              key={tab.id}
-              onClick={() => setActiveTab((currentTab) => (currentTab === tab.id ? null : tab.id))}
-              role="tab"
-              type="button"
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+            return (
+              <button
+                aria-controls={`${idPrefix}-${tab.id}`}
+                aria-selected={isActive}
+                className={`h-9 rounded-full px-2 text-[13px] font-bold transition-colors ${
+                  isActive
+                    ? "bg-white text-neutral-950 shadow-sm"
+                    : "text-neutral-500 hover:bg-white/70 hover:text-neutral-900"
+                }`}
+                key={tab.id}
+                onClick={() => onToolChange(tab.id)}
+                role="tab"
+                type="button"
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
-      {activeTab === "profile" ? (
+      {activeTool === "settings" ? (
         <ProfilePanel
+          authStatus={authStatus}
+          authUser={authUser}
+          className={panelTransitionClassName}
           idPrefix={idPrefix}
+          isAuthBusy={isAuthBusy}
+          key={`${idPrefix}-settings-panel`}
           onAvatarChange={onProfileAvatarChange}
           onAvatarClear={onProfileAvatarClear}
           onDisplayNameChange={onProfileDisplayNameChange}
           onHandleChange={onProfileHandleChange}
+          onSignOut={onSignOut}
           profile={profile}
           status={profileStatus}
         />
       ) : null}
 
-      {activeTab === "search" ? (
+      {activeTool === "search" ? (
         <section
           aria-labelledby={`${idPrefix}-search-title`}
-          className="mt-4"
+          className={panelTransitionClassName}
           id={`${idPrefix}-search`}
+          key={`${idPrefix}-search-panel`}
         >
           <h2
             className="mb-3 text-[20px] font-extrabold tracking-normal"
@@ -1424,7 +1555,7 @@ function ToolsPanel({
               type="search"
               value={query}
             />
-            <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
               <DateField
                 id={`${idPrefix}-from`}
                 label="開始日"
@@ -1445,11 +1576,12 @@ function ToolsPanel({
         </section>
       ) : null}
 
-      {activeTab === "export" ? (
+      {activeTool === "export" ? (
         <section
           aria-labelledby={`${idPrefix}-export-title`}
-          className="mt-4"
+          className={panelTransitionClassName}
           id={`${idPrefix}-export`}
+          key={`${idPrefix}-export-panel`}
         >
           <div className="mb-3 flex items-center justify-between">
             <h2
@@ -1468,7 +1600,7 @@ function ToolsPanel({
             </button>
           </div>
           <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
               <DateField
                 id={`${idPrefix}-export-from`}
                 label="開始日"
@@ -1495,36 +1627,47 @@ function ToolsPanel({
 }
 
 function ProfilePanel({
+  authStatus,
+  authUser,
+  className = "mt-4",
   idPrefix,
+  isAuthBusy,
   onAvatarChange,
   onAvatarClear,
   onDisplayNameChange,
   onHandleChange,
+  onSignOut,
   profile,
   status,
 }: {
+  authStatus: string;
+  authUser: User | null;
+  className?: string;
   idPrefix: string;
+  isAuthBusy: boolean;
   onAvatarChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onAvatarClear: () => void;
   onDisplayNameChange: (value: string) => void;
   onHandleChange: (value: string) => void;
+  onSignOut: () => void;
   profile: UserProfile;
   status: string;
 }) {
   const displayName = getProfileDisplayName(profile);
   const userHandle = getProfileHandle(profile);
+  const authEmail = authUser?.email ?? "未ログイン";
 
   return (
     <section
       aria-labelledby={`${idPrefix}-profile-title`}
-      className="mt-4"
+      className={className}
       id={`${idPrefix}-profile`}
     >
       <h2
         className="mb-3 text-[20px] font-extrabold tracking-normal"
         id={`${idPrefix}-profile-title`}
       >
-        プロフィール
+        設定
       </h2>
       <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
         <div className="flex items-center gap-3">
@@ -1566,6 +1709,29 @@ function ProfilePanel({
               />
             </div>
           </label>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-neutral-200 bg-white px-3 py-3">
+          <p className="text-[12px] font-semibold text-neutral-500">ログイン中</p>
+          <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
+            <p className="min-w-0 truncate text-[13px] font-medium text-neutral-700">
+              {authEmail}
+            </p>
+            {authUser ? (
+              <button
+                className="h-9 shrink-0 rounded-full border border-neutral-200 px-3 text-[13px] font-bold text-neutral-800 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isAuthBusy}
+                onClick={onSignOut}
+                title={authStatus || undefined}
+                type="button"
+              >
+                ログアウト
+              </button>
+            ) : null}
+          </div>
+          {authStatus ? (
+            <p className="mt-2 text-[12px] font-medium text-neutral-500">{authStatus}</p>
+          ) : null}
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -1611,12 +1777,12 @@ function DateField({
   value: string;
 }) {
   return (
-    <label className="block" htmlFor={id}>
+    <label className="block min-w-0" htmlFor={id}>
       <span className="mb-1 block text-[12px] font-semibold text-neutral-500">
         {label}
       </span>
       <input
-        className="h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-[14px] outline-none transition focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
+        className="h-10 w-full min-w-0 rounded-xl border border-neutral-200 bg-white px-3 text-[14px] outline-none transition focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
         id={id}
         onChange={(event) => onChange(event.target.value)}
         type="date"
