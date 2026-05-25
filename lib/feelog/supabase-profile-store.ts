@@ -10,6 +10,7 @@ import {
 const PROFILE_COLUMNS =
   "user_id,display_name,user_handle,avatar_storage_path,avatar_mime_type,avatar_size_bytes,created_at,updated_at";
 const PROFILE_AVATAR_BUCKET = "feelog-images";
+const PROFILE_AVATAR_PATH_PATTERN = "{user_id}/profile/avatar-{id}.webp";
 const PROFILE_AVATAR_SIGNED_URL_SECONDS = 60 * 60;
 
 type SupabaseProfileRow = {
@@ -101,7 +102,7 @@ export async function uploadSupabaseProfileAvatar({
     .from(PROFILE_AVATAR_BUCKET)
     .upload(storagePath, blob, {
       contentType: mimeType,
-      upsert: true,
+      upsert: false,
     });
 
   if (uploadError) {
@@ -115,10 +116,14 @@ export async function uploadSupabaseProfileAvatar({
   }
 
   if (previousStoragePath && previousStoragePath !== storagePath) {
-    await removeSupabaseProfileAvatar({ supabase, storagePath: previousStoragePath });
+    await removeSupabaseProfileAvatar({
+      supabase,
+      storagePath: previousStoragePath,
+      throwOnError: false,
+    });
   }
 
-  const avatarUrl = await createSignedProfileAvatarUrl(supabase, storagePath);
+  const avatarUrl = await tryCreateSignedProfileAvatarUrl(supabase, storagePath);
 
   return {
     avatarStoragePath: storagePath,
@@ -131,11 +136,13 @@ export async function uploadSupabaseProfileAvatar({
 export async function removeSupabaseProfileAvatar({
   supabase,
   storagePath,
+  throwOnError = true,
 }: {
   supabase: SupabaseClient;
   storagePath?: string;
+  throwOnError?: boolean;
 }) {
-  if (!storagePath) return;
+  if (!storagePath) return true;
 
   const { error } = await supabase.storage
     .from(PROFILE_AVATAR_BUCKET)
@@ -143,14 +150,17 @@ export async function removeSupabaseProfileAvatar({
 
   if (error) {
     logSupabaseProfileError("remove profile avatar", error, { storagePath });
-    throw error;
+    if (throwOnError) throw error;
+    return false;
   }
+
+  return true;
 }
 
 async function rowToProfile(supabase: SupabaseClient, row: SupabaseProfileRow) {
   const avatarStoragePath = row.avatar_storage_path ?? undefined;
   const avatarUrl = avatarStoragePath
-    ? await createSignedProfileAvatarUrl(supabase, avatarStoragePath)
+    ? await tryCreateSignedProfileAvatarUrl(supabase, avatarStoragePath)
     : undefined;
   const avatarSizeBytes = Number(row.avatar_size_bytes ?? 0);
 
@@ -185,9 +195,28 @@ async function createSignedProfileAvatarUrl(
   return data.signedUrl;
 }
 
+async function tryCreateSignedProfileAvatarUrl(
+  supabase: SupabaseClient,
+  storagePath: string,
+) {
+  try {
+    return await createSignedProfileAvatarUrl(supabase, storagePath);
+  } catch {
+    return undefined;
+  }
+}
+
 function buildProfileAvatarStoragePath(userId: string, mimeType: string) {
   const extension = mimeType === "image/jpeg" || mimeType === "image/jpg" ? "jpg" : "webp";
-  return `profiles/${userId}/avatar.${extension}`;
+  return `${userId}/profile/avatar-${createStorageObjectId()}.${extension}`;
+}
+
+function createStorageObjectId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function logSupabaseProfileError(
@@ -195,14 +224,55 @@ function logSupabaseProfileError(
   error: unknown,
   context: Record<string, unknown>,
 ) {
-  console.error(`[feelog] ${operation} failed`, {
-    ...context,
+  console.error(`[feelog] Supabase profile ${operation} failed`, {
+    operation,
+    context,
+    supabaseError: getSupabaseErrorDetails(error),
     profilesTable: {
       table: "profiles",
       selectedColumns: PROFILE_COLUMNS,
       avatarBucket: PROFILE_AVATAR_BUCKET,
-      avatarPathPattern: "profiles/{user_id}/avatar.webp",
+      avatarPathPattern: PROFILE_AVATAR_PATH_PATTERN,
     },
+    storageRlsNote:
+      "Profile avatars are stored under {user_id}/profile/... so Storage policies can use the same auth.uid() prefix rule as post images.",
     error,
   });
+}
+
+function getSupabaseErrorDetails(error: unknown) {
+  if (isRecord(error)) {
+    return {
+      name: getStringValue(error.name),
+      message: getStringValue(error.message),
+      code: getStringValue(error.code),
+      details: getStringValue(error.details),
+      hint: getStringValue(error.hint),
+      status: getStringOrNumberValue(error.status),
+      statusCode: getStringOrNumberValue(error.statusCode),
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+    };
+  }
+
+  return {
+    message: typeof error === "string" ? error : "Unknown Supabase error",
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getStringValue(value: unknown) {
+  return typeof value === "string" ? value : undefined;
+}
+
+function getStringOrNumberValue(value: unknown) {
+  return typeof value === "string" || typeof value === "number" ? value : undefined;
 }

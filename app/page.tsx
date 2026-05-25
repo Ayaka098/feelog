@@ -695,8 +695,9 @@ export default function Home() {
         });
         const nextProfile = {
           ...profile,
-          avatarDataUrl: undefined,
           ...avatar,
+          avatarDataUrl: undefined,
+          avatarUrl: avatar.avatarUrl,
         };
 
         await upsertSupabaseProfile({
@@ -705,6 +706,11 @@ export default function Home() {
           profile: nextProfile,
         });
         setProfile(nextProfile);
+        setProfileStatus(
+          avatar.avatarUrl
+            ? "プロフィール画像を変更しました"
+            : "プロフィール画像は保存しましたが表示URLを作成できませんでした",
+        );
       } else {
         setProfile((currentProfile) => ({
           ...currentProfile,
@@ -714,10 +720,28 @@ export default function Home() {
           avatarMimeType: undefined,
           avatarSizeBytes: undefined,
         }));
+        setProfileStatus("プロフィール画像を変更しました");
       }
-      setProfileStatus("プロフィール画像を変更しました");
     } catch (error) {
-      setProfileStatus("プロフィール画像を読み込めませんでした");
+      if (isSupabasePostsMode && authUser) {
+        const supabase = getSupabaseBrowserClient();
+
+        if (supabase) {
+          try {
+            await upsertSupabaseProfile({ supabase, userId: authUser.id, profile });
+          } catch (profileError) {
+            setDebugError(
+              formatDebugError("save text profile after avatar failure", profileError, authUser.id),
+            );
+          }
+        }
+      }
+
+      setProfileStatus(
+        isSupabasePostsMode && authUser
+          ? "プロフィール画像だけ同期できませんでした"
+          : "プロフィール画像を読み込めませんでした",
+      );
       if (authUser) {
         setDebugError(formatDebugError("update profile avatar", error, authUser.id));
       }
@@ -732,9 +756,10 @@ export default function Home() {
           throw new Error("Supabaseの環境変数が未設定です");
         }
 
-        await removeSupabaseProfileAvatar({
+        const didRemoveAvatar = await removeSupabaseProfileAvatar({
           supabase,
           storagePath: profile.avatarStoragePath,
+          throwOnError: false,
         });
         const nextProfile = {
           ...profile,
@@ -751,6 +776,11 @@ export default function Home() {
           profile: nextProfile,
         });
         setProfile(nextProfile);
+        setProfileStatus(
+          didRemoveAvatar
+            ? "プロフィール画像を解除しました"
+            : "プロフィール画像の参照を解除しました",
+        );
       } else {
         setProfile((currentProfile) => ({
           ...currentProfile,
@@ -760,8 +790,8 @@ export default function Home() {
           avatarMimeType: undefined,
           avatarSizeBytes: undefined,
         }));
+        setProfileStatus("プロフィール画像を解除しました");
       }
-      setProfileStatus("プロフィール画像を解除しました");
     } catch (error) {
       setProfileStatus("プロフィール画像を解除できませんでした");
       if (authUser) {
@@ -1648,10 +1678,10 @@ function Composer({
             <span className="shrink-0 text-neutral-500">@{userHandle}</span>
           </div>
           <textarea
-            className="min-h-24 w-full resize-none bg-transparent pt-1 text-[20px] leading-7 text-neutral-950 outline-none placeholder:text-neutral-500"
+            className="min-h-24 w-full resize-none bg-transparent pt-1 text-[20px] leading-7 text-neutral-950 outline-none placeholder:text-[#a99ca3]"
             onChange={(event) => onBodyChange(event.target.value)}
             onKeyDown={handleTextareaKeyDown}
-            placeholder="いまどう思った？"
+            placeholder="テキストを入力"
             value={body}
           />
 
@@ -2029,7 +2059,7 @@ function ToolsPanel({
                   className="text-[20px] font-extrabold tracking-normal"
                   id={`${idPrefix}-export-title`}
                 >
-                  AI出力
+                  出力
                 </h2>
                 <button
                   className="h-9 rounded-full bg-[#f8a9c8] px-4 text-[14px] font-bold text-white transition-colors hover:bg-[#f48bb5] disabled:cursor-not-allowed disabled:bg-[#f5b8cf] disabled:opacity-50 disabled:hover:bg-[#f5b8cf]"
