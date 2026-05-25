@@ -829,6 +829,8 @@ export default function Home() {
   }
 
   async function clearProfileAvatar() {
+    if (!window.confirm("プロフィール画像を削除しますか？")) return;
+
     try {
       if (isSupabasePostsMode && authUser) {
         const supabase = getSupabaseBrowserClient();
