@@ -44,6 +44,8 @@ import {
 } from "@/lib/feelog/profile-store";
 import { initialPosts } from "@/lib/feelog/seed-data";
 import {
+  PROFILE_AVATAR_BUCKET,
+  PROFILE_AVATAR_SIGNED_URL_SECONDS,
   fetchSupabaseProfile,
   removeSupabaseProfileAvatar,
   uploadSupabaseProfileAvatar,
@@ -678,6 +680,11 @@ export default function Home() {
 
     setProfileStatus("プロフィール画像を準備中");
 
+    let avatarStoragePath: string | undefined;
+    let avatarSignedUrl: string | undefined;
+    let uploadCompleted = false;
+    let signedUrlDisplayVerified: boolean | undefined;
+
     try {
       const avatarDataUrl = await fileToAvatarDataUrl(file);
 
@@ -693,11 +700,21 @@ export default function Home() {
           avatarDataUrl,
           previousStoragePath: profile.avatarStoragePath,
         });
+        avatarStoragePath = avatar.avatarStoragePath;
+        avatarSignedUrl = avatar.avatarUrl;
+        uploadCompleted = true;
+        signedUrlDisplayVerified = avatar.avatarUrl
+          ? await verifyProfileAvatarUrlForDisplay({
+              signedUrl: avatar.avatarUrl,
+              storagePath: avatar.avatarStoragePath,
+            })
+          : false;
+
         const nextProfile = {
           ...profile,
           ...avatar,
-          avatarDataUrl: undefined,
-          avatarUrl: avatar.avatarUrl,
+          avatarDataUrl: signedUrlDisplayVerified ? undefined : avatarDataUrl,
+          avatarUrl: signedUrlDisplayVerified ? avatar.avatarUrl : undefined,
         };
 
         await upsertSupabaseProfile({
@@ -706,11 +723,7 @@ export default function Home() {
           profile: nextProfile,
         });
         setProfile(nextProfile);
-        setProfileStatus(
-          avatar.avatarUrl
-            ? "プロフィール画像を変更しました"
-            : "プロフィール画像は保存しましたが表示URLを作成できませんでした",
-        );
+        setProfileStatus("プロフィール画像を変更しました");
       } else {
         setProfile((currentProfile) => ({
           ...currentProfile,
@@ -737,10 +750,27 @@ export default function Home() {
         }
       }
 
+      logProfileAvatarClientError("update profile avatar", error, {
+        bucket: PROFILE_AVATAR_BUCKET,
+        storagePath: avatarStoragePath,
+        signedUrl: avatarSignedUrl,
+        signedUrlSeconds: PROFILE_AVATAR_SIGNED_URL_SECONDS,
+        uploadCompleted,
+        signedUrlDisplayVerified,
+        supabaseConfigured: isSupabaseConfigured,
+        supabasePostsMode: isSupabasePostsMode,
+        hasAuthUser: Boolean(authUser),
+        file: {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+        },
+      });
+
       setProfileStatus(
         isSupabasePostsMode && authUser
           ? "プロフィール画像だけ同期できませんでした"
-          : "プロフィール画像を読み込めませんでした",
+          : "プロフィール画像を変更できませんでした",
       );
       if (authUser) {
         setDebugError(formatDebugError("update profile avatar", error, authUser.id));
@@ -778,8 +808,8 @@ export default function Home() {
         setProfile(nextProfile);
         setProfileStatus(
           didRemoveAvatar
-            ? "プロフィール画像を解除しました"
-            : "プロフィール画像の参照を解除しました",
+            ? "プロフィール画像を削除しました"
+            : "プロフィール画像の参照を削除しました",
         );
       } else {
         setProfile((currentProfile) => ({
@@ -790,10 +820,10 @@ export default function Home() {
           avatarMimeType: undefined,
           avatarSizeBytes: undefined,
         }));
-        setProfileStatus("プロフィール画像を解除しました");
+        setProfileStatus("プロフィール画像を削除しました");
       }
     } catch (error) {
-      setProfileStatus("プロフィール画像を解除できませんでした");
+      setProfileStatus("プロフィール画像を削除できませんでした");
       if (authUser) {
         setDebugError(formatDebugError("clear profile avatar", error, authUser.id));
       }
@@ -1197,6 +1227,81 @@ function DebugErrorNotice({ message }: { message: string }) {
   );
 }
 
+function verifyProfileAvatarUrlForDisplay({
+  signedUrl,
+  storagePath,
+}: {
+  signedUrl: string;
+  storagePath: string;
+}) {
+  return new Promise<boolean>((resolve) => {
+    const image = new window.Image();
+    let isSettled = false;
+    const context = {
+      bucket: PROFILE_AVATAR_BUCKET,
+      storagePath,
+      signedUrl,
+      signedUrlOrigin: getUrlOrigin(signedUrl),
+      signedUrlSeconds: PROFILE_AVATAR_SIGNED_URL_SECONDS,
+      currentOrigin: window.location.origin,
+      check: "browser image load",
+      corsNote:
+        "Avatar display uses a plain img element; if this fails only on Vercel, check the signed URL, object RLS, and Storage CORS.",
+    };
+    const timeout = window.setTimeout(() => {
+      if (isSettled) return;
+      isSettled = true;
+      logProfileAvatarClientError(
+        "verify profile avatar signed url display",
+        new Error("Timed out while loading signed avatar URL"),
+        context,
+      );
+      resolve(false);
+    }, 7000);
+
+    image.onload = () => {
+      if (isSettled) return;
+      isSettled = true;
+      window.clearTimeout(timeout);
+      resolve(true);
+    };
+    image.onerror = () => {
+      if (isSettled) return;
+      isSettled = true;
+      window.clearTimeout(timeout);
+      logProfileAvatarClientError(
+        "verify profile avatar signed url display",
+        new Error("Signed avatar URL did not load as an image"),
+        context,
+      );
+      resolve(false);
+    };
+    image.decoding = "async";
+    image.src = signedUrl;
+  });
+}
+
+function logProfileAvatarClientError(
+  operation: string,
+  error: unknown,
+  context: Record<string, unknown>,
+) {
+  console.error(`[feelog] ${operation} failed`, {
+    operation,
+    context,
+    supabaseError: getErrorDetails(error),
+    error,
+  });
+}
+
+function getUrlOrigin(value: string) {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "";
+  }
+}
+
 function formatDebugError(operation: string, error: unknown, userId?: string, postId?: string) {
   const parts = [`${operation} failed`];
 
@@ -1222,12 +1327,41 @@ function formatDebugError(operation: string, error: unknown, userId?: string, po
   return parts.join(" / ");
 }
 
+function getErrorDetails(error: unknown) {
+  if (isErrorRecord(error)) {
+    return {
+      name: getStringValue(error.name),
+      message: getStringValue(error.message),
+      code: getStringValue(error.code),
+      details: getStringValue(error.details),
+      hint: getStringValue(error.hint),
+      status: getStringOrNumberValue(error.status),
+      statusCode: getStringOrNumberValue(error.statusCode),
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+    };
+  }
+
+  return {
+    message: typeof error === "string" ? error : "Unknown error",
+  };
+}
+
 function isErrorRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
 function getStringValue(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function getStringOrNumberValue(value: unknown) {
+  return typeof value === "string" || typeof value === "number" ? value : "";
 }
 
 function AuthControls({
@@ -2193,7 +2327,7 @@ function ProfilePanel({
             </p>
             {authUser ? (
               <button
-                className="h-9 shrink-0 rounded-full border border-neutral-200 px-3 text-[13px] font-bold text-neutral-800 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-10 shrink-0 rounded-full border border-neutral-200 bg-neutral-50 px-4 text-[13px] font-bold text-neutral-800 shadow-sm transition-[background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-pink-100 hover:bg-white hover:shadow disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0"
                 disabled={isAuthBusy}
                 onClick={onSignOut}
                 title={authStatus || undefined}
@@ -2223,11 +2357,11 @@ function ProfilePanel({
           </label>
           {avatarUrl ? (
             <button
-              className="h-9 rounded-full px-3 text-[13px] font-semibold text-neutral-500 transition-colors hover:bg-neutral-100"
+              className="h-10 shrink-0 rounded-full border border-pink-100 bg-pink-50 px-4 text-[13px] font-bold text-neutral-700 shadow-sm transition-[background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-pink-200 hover:bg-white hover:shadow"
               onClick={onAvatarClear}
               type="button"
             >
-              解除
+              画像を削除
             </button>
           ) : null}
           {status ? (
@@ -2301,14 +2435,44 @@ function Avatar({ compact = false, profile }: { compact?: boolean; profile: User
     ? "h-10 w-10 text-[17px] leading-10"
     : "h-11 w-11 text-[18px] leading-[44px]";
   const avatarUrl = getProfileAvatarUrl(profile);
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState("");
 
-  if (avatarUrl) {
+  if (avatarUrl && failedAvatarUrl !== avatarUrl) {
+    const isRemoteAvatarUrl = avatarUrl.startsWith("http");
+
     return (
       <div
         aria-hidden="true"
-        className={`shrink-0 rounded-full border border-pink-100 bg-cover bg-center ${sizeClass}`}
-        style={{ backgroundImage: `url(${JSON.stringify(avatarUrl)})` }}
-      />
+        className={`shrink-0 overflow-hidden rounded-full border border-pink-100 bg-pink-50 ${sizeClass}`}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          alt=""
+          className="h-full w-full object-cover"
+          decoding="async"
+          onError={() => {
+            setFailedAvatarUrl(avatarUrl);
+            logProfileAvatarClientError(
+              "render profile avatar image",
+              new Error("Avatar img element failed to load"),
+              {
+                bucket: PROFILE_AVATAR_BUCKET,
+                storagePath: profile.avatarStoragePath,
+                signedUrl: isRemoteAvatarUrl ? avatarUrl : undefined,
+                signedUrlOrigin: isRemoteAvatarUrl ? getUrlOrigin(avatarUrl) : undefined,
+                signedUrlSeconds: PROFILE_AVATAR_SIGNED_URL_SECONDS,
+                dataUrlHeader: avatarUrl.startsWith("data:")
+                  ? avatarUrl.slice(0, Math.max(0, avatarUrl.indexOf(",")))
+                  : undefined,
+                currentOrigin: window.location.origin,
+                element: "img",
+                nextImageComponent: false,
+              },
+            );
+          }}
+          src={avatarUrl}
+        />
+      </div>
     );
   }
 

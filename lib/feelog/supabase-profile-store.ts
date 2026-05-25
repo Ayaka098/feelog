@@ -9,9 +9,9 @@ import {
 
 const PROFILE_COLUMNS =
   "user_id,display_name,user_handle,avatar_storage_path,avatar_mime_type,avatar_size_bytes,created_at,updated_at";
-const PROFILE_AVATAR_BUCKET = "feelog-images";
-const PROFILE_AVATAR_PATH_PATTERN = "{user_id}/profile/avatar-{id}.webp";
-const PROFILE_AVATAR_SIGNED_URL_SECONDS = 60 * 60;
+export const PROFILE_AVATAR_BUCKET = "feelog-images";
+export const PROFILE_AVATAR_SIGNED_URL_SECONDS = 60 * 60;
+const PROFILE_AVATAR_PATH_PATTERN = "{user_id}/profile/avatar-{id}.{ext}";
 
 type SupabaseProfileRow = {
   user_id: string;
@@ -98,7 +98,15 @@ export async function uploadSupabaseProfileAvatar({
   const mimeType = blob.type || "image/webp";
   const storagePath = buildProfileAvatarStoragePath(userId, mimeType);
 
-  const { error: uploadError } = await supabase.storage
+  const uploadContext = {
+    userId,
+    bucket: PROFILE_AVATAR_BUCKET,
+    storagePath,
+    mimeType,
+    sizeBytes: blob.size,
+    signedUrlSeconds: PROFILE_AVATAR_SIGNED_URL_SECONDS,
+  };
+  const { data: uploadData, error: uploadError } = await supabase.storage
     .from(PROFILE_AVATAR_BUCKET)
     .upload(storagePath, blob, {
       contentType: mimeType,
@@ -106,14 +114,19 @@ export async function uploadSupabaseProfileAvatar({
     });
 
   if (uploadError) {
-    logSupabaseProfileError("upload profile avatar", uploadError, {
-      userId,
-      storagePath,
-      mimeType,
-      sizeBytes: blob.size,
-    });
+    logSupabaseProfileError("upload profile avatar", uploadError, uploadContext);
     throw uploadError;
   }
+
+  await verifySupabaseProfileAvatarObject({
+    supabase,
+    context: {
+      ...uploadContext,
+      uploadData,
+      uploadCompleted: true,
+    },
+    storagePath,
+  });
 
   if (previousStoragePath && previousStoragePath !== storagePath) {
     await removeSupabaseProfileAvatar({
@@ -123,7 +136,11 @@ export async function uploadSupabaseProfileAvatar({
     });
   }
 
-  const avatarUrl = await tryCreateSignedProfileAvatarUrl(supabase, storagePath);
+  const avatarUrl = await tryCreateSignedProfileAvatarUrl(supabase, storagePath, {
+    ...uploadContext,
+    uploadData,
+    uploadCompleted: true,
+  });
 
   return {
     avatarStoragePath: storagePath,
@@ -149,7 +166,10 @@ export async function removeSupabaseProfileAvatar({
     .remove([storagePath]);
 
   if (error) {
-    logSupabaseProfileError("remove profile avatar", error, { storagePath });
+    logSupabaseProfileError("remove profile avatar", error, {
+      bucket: PROFILE_AVATAR_BUCKET,
+      storagePath,
+    });
     if (throwOnError) throw error;
     return false;
   }
@@ -160,7 +180,12 @@ export async function removeSupabaseProfileAvatar({
 async function rowToProfile(supabase: SupabaseClient, row: SupabaseProfileRow) {
   const avatarStoragePath = row.avatar_storage_path ?? undefined;
   const avatarUrl = avatarStoragePath
-    ? await tryCreateSignedProfileAvatarUrl(supabase, avatarStoragePath)
+    ? await tryCreateSignedProfileAvatarUrl(supabase, avatarStoragePath, {
+        bucket: PROFILE_AVATAR_BUCKET,
+        storagePath: avatarStoragePath,
+        signedUrlSeconds: PROFILE_AVATAR_SIGNED_URL_SECONDS,
+        source: "rowToProfile",
+      })
     : undefined;
   const avatarSizeBytes = Number(row.avatar_size_bytes ?? 0);
 
@@ -179,6 +204,7 @@ async function rowToProfile(supabase: SupabaseClient, row: SupabaseProfileRow) {
 async function createSignedProfileAvatarUrl(
   supabase: SupabaseClient,
   storagePath: string,
+  context: Record<string, unknown> = {},
 ) {
   const { data, error } = await supabase.storage
     .from(PROFILE_AVATAR_BUCKET)
@@ -186,6 +212,8 @@ async function createSignedProfileAvatarUrl(
 
   if (error) {
     logSupabaseProfileError("create profile avatar signed url", error, {
+      ...context,
+      bucket: PROFILE_AVATAR_BUCKET,
       storagePath,
       signedUrlSeconds: PROFILE_AVATAR_SIGNED_URL_SECONDS,
     });
@@ -198,17 +226,53 @@ async function createSignedProfileAvatarUrl(
 async function tryCreateSignedProfileAvatarUrl(
   supabase: SupabaseClient,
   storagePath: string,
+  context: Record<string, unknown> = {},
 ) {
   try {
-    return await createSignedProfileAvatarUrl(supabase, storagePath);
+    return await createSignedProfileAvatarUrl(supabase, storagePath, context);
   } catch {
     return undefined;
   }
 }
 
+async function verifySupabaseProfileAvatarObject({
+  supabase,
+  storagePath,
+  context,
+}: {
+  supabase: SupabaseClient;
+  storagePath: string;
+  context: Record<string, unknown>;
+}) {
+  const { data, error } = await supabase.storage
+    .from(PROFILE_AVATAR_BUCKET)
+    .download(storagePath);
+
+  if (error) {
+    logSupabaseProfileError("verify profile avatar storage object", error, {
+      ...context,
+      verification: "download after upload",
+      rlsHint:
+        "Upload succeeded, but reading the object failed. Check Storage select RLS for private buckets.",
+    });
+    return false;
+  }
+
+  return Boolean(data);
+}
+
 function buildProfileAvatarStoragePath(userId: string, mimeType: string) {
-  const extension = mimeType === "image/jpeg" || mimeType === "image/jpg" ? "jpg" : "webp";
+  const extension = getProfileAvatarExtension(mimeType);
   return `${userId}/profile/avatar-${createStorageObjectId()}.${extension}`;
+}
+
+function getProfileAvatarExtension(mimeType: string) {
+  if (mimeType === "image/jpeg" || mimeType === "image/jpg") return "jpg";
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/gif") return "gif";
+  if (mimeType === "image/heic") return "heic";
+  if (mimeType === "image/heif") return "heif";
+  return "webp";
 }
 
 function createStorageObjectId() {
@@ -236,6 +300,8 @@ function logSupabaseProfileError(
     },
     storageRlsNote:
       "Profile avatars are stored under {user_id}/profile/... so Storage policies can use the same auth.uid() prefix rule as post images.",
+    bucketVisibilityNote:
+      "The app uses signed URLs and works with a private bucket. createSignedUrl requires Storage select access for the authenticated user.",
     error,
   });
 }

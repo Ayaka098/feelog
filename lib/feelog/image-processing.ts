@@ -74,35 +74,40 @@ export function dataUrlToBlob(dataUrl: string) {
 
 export async function fileToAvatarDataUrl(file: File) {
   const originalDataUrl = await readFileAsDataUrl(file);
-  const image = await loadImageElement(originalDataUrl);
-  const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
-  const sourceX = Math.max(0, Math.round((image.naturalWidth - sourceSize) / 2));
-  const sourceY = Math.max(0, Math.round((image.naturalHeight - sourceSize) / 2));
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d");
 
-  if (!context) {
-    throw new Error("プロフィール画像を変換できませんでした");
+  try {
+    const image = await loadImageElement(originalDataUrl);
+    const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
+    const sourceX = Math.max(0, Math.round((image.naturalWidth - sourceSize) / 2));
+    const sourceY = Math.max(0, Math.round((image.naturalHeight - sourceSize) / 2));
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("プロフィール画像を変換できませんでした");
+    }
+
+    canvas.width = PROFILE_AVATAR_EDGE;
+    canvas.height = PROFILE_AVATAR_EDGE;
+    context.drawImage(
+      image,
+      sourceX,
+      sourceY,
+      sourceSize,
+      sourceSize,
+      0,
+      0,
+      PROFILE_AVATAR_EDGE,
+      PROFILE_AVATAR_EDGE,
+    );
+
+    const webpDataUrl = canvas.toDataURL("image/webp", 0.86);
+    return webpDataUrl.startsWith("data:image/webp")
+      ? webpDataUrl
+      : canvas.toDataURL("image/jpeg", 0.88);
+  } catch {
+    return originalDataUrl;
   }
-
-  canvas.width = PROFILE_AVATAR_EDGE;
-  canvas.height = PROFILE_AVATAR_EDGE;
-  context.drawImage(
-    image,
-    sourceX,
-    sourceY,
-    sourceSize,
-    sourceSize,
-    0,
-    0,
-    PROFILE_AVATAR_EDGE,
-    PROFILE_AVATAR_EDGE,
-  );
-
-  const webpDataUrl = canvas.toDataURL("image/webp", 0.86);
-  return webpDataUrl.startsWith("data:image/webp")
-    ? webpDataUrl
-    : canvas.toDataURL("image/jpeg", 0.88);
 }
 
 function readFileAsDataUrl(file: File) {
