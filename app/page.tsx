@@ -64,14 +64,24 @@ import {
   hasSupabaseBrowserConfig,
 } from "@/lib/supabase/client";
 
-const PINK = "#f8a9c8";
-const PINK_HOVER = "#f48bb5";
 const HEADER_LOGO_SRC = "/feelog-logo-header-v2.png";
 const APP_ICON_SRC = "/feelog-logo-favicon.png";
 const isSupabaseConfigured = hasSupabaseBrowserConfig();
 const isDevelopment = process.env.NODE_ENV !== "production";
 type ToolTab = "home" | "search" | "export" | "settings";
 type RailIconName = ToolTab;
+const BUTTON_PRIMARY_CLASS =
+  "rounded-full bg-[#f8a9c8] text-white transition-colors duration-150 hover:bg-[#f48bb5] disabled:cursor-not-allowed disabled:bg-[#f5b8cf] disabled:opacity-50 disabled:hover:bg-[#f5b8cf]";
+const BUTTON_SECONDARY_CLASS =
+  "rounded-full border border-pink-100 bg-pink-50 transition-colors duration-150 hover:border-pink-200 hover:bg-white disabled:cursor-not-allowed disabled:border-neutral-200 disabled:bg-white disabled:text-neutral-400 disabled:opacity-70 disabled:hover:border-neutral-200 disabled:hover:bg-white";
+const BUTTON_NEUTRAL_CLASS =
+  "rounded-full border border-neutral-200 bg-neutral-50 text-neutral-700 transition-colors duration-150 hover:border-neutral-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50";
+const BUTTON_TEXT_CLASS =
+  "rounded-full text-neutral-500 transition-colors duration-150 hover:bg-pink-50 hover:text-neutral-800";
+const BUTTON_DANGER_TEXT_CLASS =
+  "rounded-full text-neutral-500 transition-colors duration-150 hover:bg-red-50 hover:text-red-600";
+const BUTTON_ICON_CLASS =
+  "rounded-full text-neutral-800 transition-colors duration-150 hover:bg-pink-50";
 
 export default function Home() {
   const [posts, setPosts] = useState<Post[]>(
@@ -1045,7 +1055,7 @@ export default function Home() {
               <button
                 aria-expanded={isMobileMenuOpen}
                 aria-label="メニューを開く"
-                className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-900 transition-colors hover:bg-pink-50 md:hidden"
+                className={`flex h-10 w-10 items-center justify-center md:hidden ${BUTTON_ICON_CLASS}`}
                 onClick={() => setIsMobileMenuOpen(true)}
                 type="button"
               >
@@ -1386,10 +1396,9 @@ function AuthControls({
   return (
     <div className="flex min-w-0 shrink-0 items-center gap-2">
       <button
-        className="h-9 rounded-full px-4 text-[14px] font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        className={`h-9 px-4 text-[14px] font-bold ${BUTTON_PRIMARY_CLASS}`}
         disabled={isDisabled}
         onClick={onSignIn}
-        style={{ backgroundColor: isDisabled ? "#f5b8cf" : PINK }}
         title={status || undefined}
         type="button"
       >
@@ -1524,7 +1533,7 @@ function MobileMenu({
           />
           <button
             aria-label="メニューを閉じる"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-700 transition-colors hover:bg-pink-50"
+            className={`flex h-9 w-9 items-center justify-center ${BUTTON_ICON_CLASS}`}
             onClick={onClose}
             type="button"
           >
@@ -1828,8 +1837,7 @@ function Composer({
           <div className="flex items-center justify-between gap-2 border-t border-neutral-100 py-3">
             <div className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden">
               <label
-                className="flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full px-3 text-[14px] font-semibold transition-colors hover:bg-pink-50"
-                style={{ color: PINK_HOVER }}
+                className={`flex h-9 shrink-0 cursor-pointer items-center gap-2 px-3 text-[14px] font-semibold text-[#f48bb5] ${BUTTON_SECONDARY_CLASS}`}
               >
                 <span aria-hidden="true" className="flex h-5 w-5 items-center justify-center">
                   <CameraIcon />
@@ -1844,7 +1852,7 @@ function Composer({
               </label>
               {draftImage ? (
                 <button
-                  className="h-9 shrink-0 rounded-full px-3 text-[13px] font-semibold text-neutral-500 transition-colors hover:bg-neutral-100"
+                  className={`h-9 shrink-0 px-3 text-[13px] font-semibold ${BUTTON_NEUTRAL_CLASS}`}
                   onClick={onClearImage}
                   type="button"
                 >
@@ -1858,7 +1866,7 @@ function Composer({
               ) : null}
             </div>
             <button
-              className="h-9 shrink-0 rounded-full bg-[#f8a9c8] px-5 text-[15px] font-bold text-white transition-colors hover:bg-[#f48bb5] disabled:cursor-not-allowed disabled:bg-[#f5b8cf] disabled:opacity-50 disabled:hover:bg-[#f5b8cf]"
+              className={`h-9 shrink-0 px-5 text-[15px] font-bold ${BUTTON_PRIMARY_CLASS}`}
               disabled={!body.trim() || isPostDisabled}
               type="submit"
             >
@@ -1914,14 +1922,14 @@ function PostItem({
             </div>
             <div className="flex shrink-0 items-center gap-1 text-[13px]">
               <button
-                className="rounded-full px-2 py-1 font-medium text-neutral-500 transition-colors hover:bg-pink-50"
+                className={`px-2 py-1 font-medium ${BUTTON_TEXT_CLASS}`}
                 onClick={onEdit}
                 type="button"
               >
                 編集
               </button>
               <button
-                className="rounded-full px-2 py-1 font-medium text-neutral-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                className={`px-2 py-1 font-medium ${BUTTON_DANGER_TEXT_CLASS}`}
                 onClick={onDelete}
                 type="button"
               >
@@ -1939,17 +1947,16 @@ function PostItem({
               />
               <div className="mt-2 flex justify-end gap-2">
                 <button
-                  className="h-9 rounded-full px-4 text-[14px] font-semibold text-neutral-700 transition-colors hover:bg-neutral-100"
+                  className={`h-9 px-4 text-[14px] font-semibold ${BUTTON_NEUTRAL_CLASS}`}
                   onClick={onCancelEdit}
                   type="button"
                 >
                   キャンセル
                 </button>
                 <button
-                  className="h-9 rounded-full px-4 text-[14px] font-bold text-white transition-colors disabled:opacity-50"
+                  className={`h-9 px-4 text-[14px] font-bold ${BUTTON_PRIMARY_CLASS}`}
                   disabled={!editingBody.trim()}
                   onClick={onSaveEdit}
-                  style={{ backgroundColor: editingBody.trim() ? PINK : "#f5b8cf" }}
                   type="button"
                 >
                   保存
@@ -1971,7 +1978,7 @@ function PostItem({
 
           <div className="mt-3 flex items-center text-[14px] text-neutral-500">
             <div className="flex items-center gap-2">
-              <span aria-hidden="true" className="text-[17px]" style={{ color: PINK_HOVER }}>
+              <span aria-hidden="true" className="text-[17px] text-[#f48bb5]">
                 ♡
               </span>
               <span>{hearts}</span>
@@ -2085,10 +2092,10 @@ function ToolsPanel({
               <button
                 aria-controls={`${idPrefix}-${tab.id}`}
                 aria-selected={isActive}
-                className={`h-9 rounded-full px-2 text-[13px] font-bold transition-colors ${
+                className={`h-9 rounded-full border px-2 text-[13px] font-bold transition-colors duration-150 ${
                   isActive
-                    ? "bg-white text-neutral-950 shadow-sm"
-                    : "text-neutral-500 hover:bg-white/70 hover:text-neutral-900"
+                    ? "border-neutral-200 bg-white text-neutral-950"
+                    : "border-transparent bg-transparent text-neutral-500 hover:bg-pink-50 hover:text-neutral-900"
                 }`}
                 key={tab.id}
                 onClick={() => onToolChange(tab.id)}
@@ -2169,7 +2176,7 @@ function ToolsPanel({
                     {hasTimelineFilters ? "絞り込み中" : "すべて表示"} · {resultCount}件
                   </p>
                   <button
-                    className="h-8 rounded-full border border-pink-100 bg-pink-50 px-3 text-[13px] font-bold text-neutral-700 shadow-sm transition-[background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-pink-200 hover:bg-white hover:shadow disabled:cursor-not-allowed disabled:border-neutral-200 disabled:bg-white disabled:text-neutral-400 disabled:opacity-70 disabled:shadow-none disabled:hover:translate-y-0"
+                    className={`h-8 px-3 text-[13px] font-bold text-neutral-700 ${BUTTON_SECONDARY_CLASS}`}
                     disabled={!hasTimelineFilters}
                     onClick={onClearTimelineFilters}
                     type="button"
@@ -2196,7 +2203,7 @@ function ToolsPanel({
                   出力
                 </h2>
                 <button
-                  className="h-9 rounded-full bg-[#f8a9c8] px-4 text-[14px] font-bold text-white transition-colors hover:bg-[#f48bb5] disabled:cursor-not-allowed disabled:bg-[#f5b8cf] disabled:opacity-50 disabled:hover:bg-[#f5b8cf]"
+                  className={`h-9 px-4 text-[14px] font-bold ${BUTTON_PRIMARY_CLASS}`}
                   disabled={!exportText}
                   onClick={onCopy}
                   type="button"
@@ -2327,7 +2334,7 @@ function ProfilePanel({
             </p>
             {authUser ? (
               <button
-                className="h-10 shrink-0 rounded-full border border-neutral-200 bg-neutral-50 px-4 text-[13px] font-bold text-neutral-800 shadow-sm transition-[background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-pink-100 hover:bg-white hover:shadow disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0"
+                className={`h-10 shrink-0 px-4 text-[13px] font-bold ${BUTTON_NEUTRAL_CLASS}`}
                 disabled={isAuthBusy}
                 onClick={onSignOut}
                 title={authStatus || undefined}
@@ -2344,8 +2351,7 @@ function ProfilePanel({
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <label
-            className="flex h-9 cursor-pointer items-center rounded-full bg-white px-3 text-[13px] font-bold text-neutral-700 transition-colors hover:bg-pink-50"
-            style={{ color: PINK_HOVER }}
+            className={`flex h-10 cursor-pointer items-center px-4 text-[13px] font-bold text-[#f48bb5] ${BUTTON_SECONDARY_CLASS}`}
           >
             アイコン画像を変更
             <input
@@ -2357,7 +2363,7 @@ function ProfilePanel({
           </label>
           {avatarUrl ? (
             <button
-              className="h-10 shrink-0 rounded-full border border-pink-100 bg-pink-50 px-4 text-[13px] font-bold text-neutral-700 shadow-sm transition-[background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-pink-200 hover:bg-white hover:shadow"
+              className={`h-10 shrink-0 px-4 text-[13px] font-bold text-neutral-700 ${BUTTON_SECONDARY_CLASS}`}
               onClick={onAvatarClear}
               type="button"
             >
