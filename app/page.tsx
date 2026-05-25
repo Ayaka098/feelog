@@ -100,6 +100,7 @@ export default function Home() {
   const [isMutatingPost, setIsMutatingPost] = useState(false);
   const [activeTool, setActiveTool] = useState<ToolTab>("home");
   const [renderedPanelTool, setRenderedPanelTool] = useState<ToolTab>("home");
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(TIMELINE_PAGE_SIZE);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -168,6 +169,17 @@ export default function Home() {
         window.clearTimeout(panelCloseTimerRef.current);
       }
     };
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsMobileMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   useEffect(() => {
@@ -763,6 +775,11 @@ export default function Home() {
     setRenderedPanelTool(tool);
   }
 
+  function handleMobileToolChange(tool: ToolTab) {
+    handleToolChange(tool);
+    setIsMobileMenuOpen(false);
+  }
+
   const hasRenderedSidePanel = renderedPanelTool !== "home";
   const isPanelExiting = activeTool === "home" && hasRenderedSidePanel;
 
@@ -780,7 +797,7 @@ export default function Home() {
                 aria-label="ホームへ戻る"
                 className="block min-w-0 rounded-sm transition-opacity hover:opacity-80"
                 href="#top"
-                onClick={() => handleToolChange("home")}
+                onClick={() => handleMobileToolChange("home")}
               >
                 <Image
                   alt="feelog"
@@ -792,14 +809,25 @@ export default function Home() {
                 />
               </a>
             </div>
-            <AuthControls
-              isBusy={isAuthBusy}
-              isConfigured={isSupabaseConfigured}
-              isReady={authReady}
-              onSignIn={signInWithGoogle}
-              status={authStatus}
-              user={authUser}
-            />
+            <div className="flex min-w-0 shrink-0 items-center gap-2">
+              <AuthControls
+                isBusy={isAuthBusy}
+                isConfigured={isSupabaseConfigured}
+                isReady={authReady}
+                onSignIn={signInWithGoogle}
+                status={authStatus}
+                user={authUser}
+              />
+              <button
+                aria-expanded={isMobileMenuOpen}
+                aria-label="メニューを開く"
+                className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-900 transition-colors hover:bg-pink-50 md:hidden"
+                onClick={() => setIsMobileMenuOpen(true)}
+                type="button"
+              >
+                <MenuIcon />
+              </button>
+            </div>
           </header>
 
           <Composer
@@ -814,41 +842,43 @@ export default function Home() {
             status={imageStatus}
           />
 
-          <div className="border-b border-neutral-200 xl:hidden">
-            <ToolsPanel
-              activeTool={activeTool}
-              authStatus={authStatus}
-              authUser={authUser}
-              copyState={copyState}
-              displayTool={renderedPanelTool}
-              exportFromDate={exportFromDate}
-              exportText={exportText}
-              exportToDate={exportToDate}
-              fromDate={fromDate}
-              hasTimelineFilters={hasTimelineFilters}
-              idPrefix="mobile"
-              isAuthBusy={isAuthBusy}
-              isPanelClosing={isPanelExiting}
-              onClearTimelineFilters={clearTimelineFilters}
-              onCopy={copyExportText}
-              onProfileAvatarChange={handleProfileAvatarChange}
-              onProfileAvatarClear={clearProfileAvatar}
-              onProfileDisplayNameChange={updateProfileDisplayName}
-              onProfileHandleChange={updateProfileHandle}
-              onSignOut={signOut}
-              onToolChange={handleToolChange}
-              profile={profile}
-              profileStatus={profileStatus}
-              query={query}
-              resultCount={displayedTotal}
-              setExportFromDate={setExportFromDate}
-              setExportToDate={setExportToDate}
-              setFromDate={handleFromDateChange}
-              setQuery={handleQueryChange}
-              setToDate={handleToDateChange}
-              toDate={toDate}
-            />
-          </div>
+          {hasRenderedSidePanel ? (
+            <div className="border-b border-neutral-200 xl:hidden">
+              <ToolsPanel
+                activeTool={activeTool}
+                authStatus={authStatus}
+                authUser={authUser}
+                copyState={copyState}
+                displayTool={renderedPanelTool}
+                exportFromDate={exportFromDate}
+                exportText={exportText}
+                exportToDate={exportToDate}
+                fromDate={fromDate}
+                hasTimelineFilters={hasTimelineFilters}
+                idPrefix="mobile"
+                isAuthBusy={isAuthBusy}
+                isPanelClosing={isPanelExiting}
+                onClearTimelineFilters={clearTimelineFilters}
+                onCopy={copyExportText}
+                onProfileAvatarChange={handleProfileAvatarChange}
+                onProfileAvatarClear={clearProfileAvatar}
+                onProfileDisplayNameChange={updateProfileDisplayName}
+                onProfileHandleChange={updateProfileHandle}
+                onSignOut={signOut}
+                onToolChange={handleToolChange}
+                profile={profile}
+                profileStatus={profileStatus}
+                query={query}
+                resultCount={displayedTotal}
+                setExportFromDate={setExportFromDate}
+                setExportToDate={setExportToDate}
+                setFromDate={handleFromDateChange}
+                setQuery={handleQueryChange}
+                setToDate={handleToDateChange}
+                toDate={toDate}
+              />
+            </div>
+          ) : null}
           <DebugErrorNotice message={debugError} />
 
           <section aria-label="タイムライン">
@@ -949,6 +979,12 @@ export default function Home() {
           </aside>
         ) : null}
       </div>
+      <MobileMenu
+        activeTool={activeTool}
+        isOpen={isMobileMenuOpen}
+        onClose={() => setIsMobileMenuOpen(false)}
+        onToolChange={handleMobileToolChange}
+      />
     </div>
   );
 }
@@ -1117,6 +1153,120 @@ function AppRail({
   );
 }
 
+function MobileMenu({
+  activeTool,
+  isOpen,
+  onClose,
+  onToolChange,
+}: {
+  activeTool: ToolTab;
+  isOpen: boolean;
+  onClose: () => void;
+  onToolChange: (tool: ToolTab) => void;
+}) {
+  return (
+    <div
+      aria-hidden={!isOpen}
+      className={`fixed inset-0 z-50 md:hidden ${
+        isOpen ? "pointer-events-auto" : "pointer-events-none"
+      }`}
+    >
+      <button
+        aria-label="メニューを閉じる"
+        className={`feelog-mobile-menu-backdrop absolute inset-0 bg-neutral-950/20 ${
+          isOpen ? "feelog-mobile-menu-backdrop-open" : ""
+        }`}
+        onClick={onClose}
+        type="button"
+      />
+      <aside
+        aria-label="メニュー"
+        className={`feelog-mobile-menu-panel absolute inset-y-0 left-0 flex w-[min(78vw,300px)] flex-col border-r border-neutral-200 bg-white px-4 py-3 shadow-xl ${
+          isOpen ? "feelog-mobile-menu-panel-open" : ""
+        }`}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <Image
+            alt="feelog"
+            className="h-10 w-10 object-contain"
+            height={512}
+            priority
+            src={APP_ICON_SRC}
+            width={512}
+          />
+          <button
+            aria-label="メニューを閉じる"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-neutral-700 transition-colors hover:bg-pink-50"
+            onClick={onClose}
+            type="button"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+        <nav className="space-y-1 text-[18px] font-bold">
+          <MobileMenuLink
+            active={activeTool === "home"}
+            href="#top"
+            icon="home"
+            label="ホーム"
+            onSelect={() => onToolChange("home")}
+          />
+          <MobileMenuLink
+            active={activeTool === "search"}
+            href="#mobile-tools"
+            icon="search"
+            label="検索"
+            onSelect={() => onToolChange("search")}
+          />
+          <MobileMenuLink
+            active={activeTool === "export"}
+            href="#mobile-tools"
+            icon="export"
+            label="出力"
+            onSelect={() => onToolChange("export")}
+          />
+          <MobileMenuLink
+            active={activeTool === "settings"}
+            href="#mobile-tools"
+            icon="settings"
+            label="設定"
+            onSelect={() => onToolChange("settings")}
+          />
+        </nav>
+      </aside>
+    </div>
+  );
+}
+
+function MobileMenuLink({
+  active,
+  href,
+  icon,
+  label,
+  onSelect,
+}: {
+  active: boolean;
+  href: string;
+  icon: ToolTab;
+  label: string;
+  onSelect: () => void;
+}) {
+  return (
+    <a
+      className={`grid h-12 grid-cols-[28px_minmax(0,1fr)] items-center gap-4 rounded-full px-3 transition-colors ${
+        active ? "bg-pink-50 text-neutral-950" : "text-neutral-900 hover:bg-pink-50"
+      }`}
+      href={href}
+      onClick={onSelect}
+    >
+      <span aria-hidden="true" className="flex h-7 w-7 items-center justify-center">
+        <RailIcon name={icon} />
+      </span>
+      <span className="min-w-0 truncate">{label}</span>
+    </a>
+  );
+}
+
 function RailToolLink({
   active,
   className = "",
@@ -1232,6 +1382,41 @@ function RailIcon({ name }: { name: RailIconName }) {
       <path d="M12 4v10" />
       <path d="m8.5 7.5 3.5-3.5 3.5 3.5" />
       <path d="M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14" />
+    </svg>
+  );
+}
+
+function MenuIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-[22px] w-[22px]"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="M4 7h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17h16" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-[21px] w-[21px]"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+    >
+      <path d="m6 6 12 12" />
+      <path d="M18 6 6 18" />
     </svg>
   );
 }
@@ -1546,7 +1731,7 @@ function ToolsPanel({
     { id: "export", label: "出力" },
     { id: "settings", label: "設定" },
   ];
-  const showTabs = idPrefix === "mobile";
+  const showTabs = false;
   const sectionClassName = showTabs ? "mt-4" : "";
   const panelMotionClassName = isPanelClosing
     ? "feelog-panel-transition feelog-panel-transition-out"
@@ -1630,7 +1815,7 @@ function ToolsPanel({
                   キーワード
                 </label>
                 <input
-                  className="h-11 w-full rounded-full border border-transparent bg-white px-4 text-[15px] outline-none transition focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
+                  className="h-11 w-full rounded-full border border-neutral-200 bg-neutral-100 px-4 text-[15px] text-neutral-950 outline-none transition-[background-color,border-color,box-shadow] duration-150 placeholder:text-neutral-500 focus:border-pink-200 focus:bg-white focus:ring-2 focus:ring-pink-100"
                   id={`${idPrefix}-keyword`}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="検索"
@@ -1656,7 +1841,7 @@ function ToolsPanel({
                     {hasTimelineFilters ? "絞り込み中" : "すべて表示"} · {resultCount}件
                   </p>
                   <button
-                    className="h-8 rounded-full px-3 text-[13px] font-bold text-neutral-600 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                    className="h-8 rounded-full border border-pink-100 bg-pink-50 px-3 text-[13px] font-bold text-neutral-700 shadow-sm transition-[background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-pink-200 hover:bg-white hover:shadow disabled:cursor-not-allowed disabled:border-neutral-200 disabled:bg-white disabled:text-neutral-400 disabled:opacity-70 disabled:shadow-none disabled:hover:translate-y-0"
                     disabled={!hasTimelineFilters}
                     onClick={onClearTimelineFilters}
                     type="button"
