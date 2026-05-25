@@ -9,9 +9,11 @@ import {
 
 const PROFILE_COLUMNS =
   "user_id,display_name,user_handle,avatar_storage_path,avatar_mime_type,avatar_size_bytes,created_at,updated_at";
+const PROFILE_TEXT_COLUMNS =
+  "user_id,display_name,user_handle,created_at,updated_at";
 export const PROFILE_AVATAR_BUCKET = "feelog-images";
 export const PROFILE_AVATAR_SIGNED_URL_SECONDS = 60 * 60;
-const PROFILE_AVATAR_PATH_PATTERN = "{user_id}/profile/avatar-{id}.{ext}";
+const PROFILE_AVATAR_PATH_PATTERN = "{user_id}/profile/avatar-{id}.webp";
 
 type SupabaseProfileRow = {
   user_id: string;
@@ -23,6 +25,46 @@ type SupabaseProfileRow = {
   created_at: string;
   updated_at: string;
 };
+
+type SupabaseProfileTextRow = {
+  user_id: string;
+  display_name: string | null;
+  user_handle: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type SupabaseProfileErrorOperation =
+  | "avatar blob failed"
+  | "storage upload failed"
+  | "storage download verify failed"
+  | "signed URL failed"
+  | "profiles update failed"
+  | "profiles text update failed"
+  | "fetch profile failed"
+  | "storage remove failed";
+
+export class SupabaseProfileOperationError extends Error {
+  operation: SupabaseProfileErrorOperation;
+  context: Record<string, unknown>;
+  supabaseError: unknown;
+
+  constructor({
+    operation,
+    cause,
+    context,
+  }: {
+    operation: SupabaseProfileErrorOperation;
+    cause: unknown;
+    context: Record<string, unknown>;
+  }) {
+    super(operation);
+    this.name = "SupabaseProfileOperationError";
+    this.operation = operation;
+    this.context = context;
+    this.supabaseError = cause;
+  }
+}
 
 export async function fetchSupabaseProfile({
   supabase,
@@ -38,13 +80,44 @@ export async function fetchSupabaseProfile({
     .maybeSingle();
 
   if (error) {
-    logSupabaseProfileError("fetch profile", error, { userId });
-    throw error;
+    throw createSupabaseProfileError("fetch profile failed", error, { user_id: userId });
   }
 
   if (!data) return null;
 
   return rowToProfile(supabase, data as SupabaseProfileRow);
+}
+
+export async function upsertSupabaseTextProfile({
+  supabase,
+  userId,
+  profile,
+}: {
+  supabase: SupabaseClient;
+  userId: string;
+  profile: UserProfile;
+}) {
+  const payload = {
+    user_id: userId,
+    display_name: getProfileDisplayName(profile),
+    user_handle: getProfileHandle(profile),
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .upsert(payload, { onConflict: "user_id" })
+    .select(PROFILE_TEXT_COLUMNS)
+    .single();
+
+  if (error) {
+    throw createSupabaseProfileError("profiles text update failed", error, {
+      user_id: userId,
+      payloadColumns: Object.keys(payload),
+    });
+  }
+
+  return textRowToProfile(data as SupabaseProfileTextRow);
 }
 
 export async function upsertSupabaseProfile({
@@ -73,11 +146,10 @@ export async function upsertSupabaseProfile({
     .single();
 
   if (error) {
-    logSupabaseProfileError("upsert profile", error, {
-      userId,
+    throw createSupabaseProfileError("profiles update failed", error, {
+      user_id: userId,
       payloadColumns: Object.keys(payload),
     });
-    throw error;
   }
 
   return rowToProfile(supabase, data as SupabaseProfileRow);
@@ -94,12 +166,23 @@ export async function uploadSupabaseProfileAvatar({
   avatarDataUrl: string;
   previousStoragePath?: string;
 }) {
-  const blob = dataUrlToBlob(avatarDataUrl);
+  let blob: Blob;
+
+  try {
+    blob = dataUrlToBlob(avatarDataUrl);
+  } catch (error) {
+    throw createSupabaseProfileError("avatar blob failed", error, {
+      user_id: userId,
+      bucket: PROFILE_AVATAR_BUCKET,
+      storagePath: null,
+    });
+  }
+
   const mimeType = blob.type || "image/webp";
-  const storagePath = buildProfileAvatarStoragePath(userId, mimeType);
+  const storagePath = buildProfileAvatarStoragePath(userId);
 
   const uploadContext = {
-    userId,
+    user_id: userId,
     bucket: PROFILE_AVATAR_BUCKET,
     storagePath,
     mimeType,
@@ -114,11 +197,10 @@ export async function uploadSupabaseProfileAvatar({
     });
 
   if (uploadError) {
-    logSupabaseProfileError("upload profile avatar", uploadError, uploadContext);
-    throw uploadError;
+    throw createSupabaseProfileError("storage upload failed", uploadError, uploadContext);
   }
 
-  await verifySupabaseProfileAvatarObject({
+  const storageObjectVerified = await verifySupabaseProfileAvatarObject({
     supabase,
     context: {
       ...uploadContext,
@@ -132,6 +214,7 @@ export async function uploadSupabaseProfileAvatar({
     await removeSupabaseProfileAvatar({
       supabase,
       storagePath: previousStoragePath,
+      userId,
       throwOnError: false,
     });
   }
@@ -140,6 +223,7 @@ export async function uploadSupabaseProfileAvatar({
     ...uploadContext,
     uploadData,
     uploadCompleted: true,
+    storageObjectVerified,
   });
 
   return {
@@ -147,16 +231,20 @@ export async function uploadSupabaseProfileAvatar({
     avatarUrl,
     avatarMimeType: mimeType,
     avatarSizeBytes: blob.size,
+    storageObjectVerified,
+    signedUrlCreated: Boolean(avatarUrl),
   };
 }
 
 export async function removeSupabaseProfileAvatar({
   supabase,
   storagePath,
+  userId,
   throwOnError = true,
 }: {
   supabase: SupabaseClient;
   storagePath?: string;
+  userId?: string;
   throwOnError?: boolean;
 }) {
   if (!storagePath) return true;
@@ -166,15 +254,23 @@ export async function removeSupabaseProfileAvatar({
     .remove([storagePath]);
 
   if (error) {
-    logSupabaseProfileError("remove profile avatar", error, {
+    const profileError = createSupabaseProfileError("storage remove failed", error, {
+      user_id: userId,
       bucket: PROFILE_AVATAR_BUCKET,
       storagePath,
     });
-    if (throwOnError) throw error;
+    if (throwOnError) throw profileError;
     return false;
   }
 
   return true;
+}
+
+function textRowToProfile(row: SupabaseProfileTextRow) {
+  return {
+    displayName: row.display_name ?? DEFAULT_USER_PROFILE.displayName,
+    userHandle: row.user_handle ?? DEFAULT_USER_PROFILE.userHandle,
+  } satisfies UserProfile;
 }
 
 async function rowToProfile(supabase: SupabaseClient, row: SupabaseProfileRow) {
@@ -211,13 +307,12 @@ async function createSignedProfileAvatarUrl(
     .createSignedUrl(storagePath, PROFILE_AVATAR_SIGNED_URL_SECONDS);
 
   if (error) {
-    logSupabaseProfileError("create profile avatar signed url", error, {
+    throw createSupabaseProfileError("signed URL failed", error, {
       ...context,
       bucket: PROFILE_AVATAR_BUCKET,
       storagePath,
       signedUrlSeconds: PROFILE_AVATAR_SIGNED_URL_SECONDS,
     });
-    throw error;
   }
 
   return data.signedUrl;
@@ -249,7 +344,7 @@ async function verifySupabaseProfileAvatarObject({
     .download(storagePath);
 
   if (error) {
-    logSupabaseProfileError("verify profile avatar storage object", error, {
+    createSupabaseProfileError("storage download verify failed", error, {
       ...context,
       verification: "download after upload",
       rlsHint:
@@ -261,18 +356,30 @@ async function verifySupabaseProfileAvatarObject({
   return Boolean(data);
 }
 
-function buildProfileAvatarStoragePath(userId: string, mimeType: string) {
-  const extension = getProfileAvatarExtension(mimeType);
-  return `${userId}/profile/avatar-${createStorageObjectId()}.${extension}`;
+function buildProfileAvatarStoragePath(userId: string) {
+  return `${userId}/profile/avatar-${createStorageObjectId()}.webp`;
 }
 
-function getProfileAvatarExtension(mimeType: string) {
-  if (mimeType === "image/jpeg" || mimeType === "image/jpg") return "jpg";
-  if (mimeType === "image/png") return "png";
-  if (mimeType === "image/gif") return "gif";
-  if (mimeType === "image/heic") return "heic";
-  if (mimeType === "image/heif") return "heif";
-  return "webp";
+function createSupabaseProfileError(
+  operation: SupabaseProfileErrorOperation,
+  error: unknown,
+  context: Record<string, unknown>,
+) {
+  const profileError = new SupabaseProfileOperationError({
+    operation,
+    cause: error,
+    context,
+  });
+  logSupabaseProfileError(profileError);
+  return profileError;
+}
+
+function getProfileErrorCause(error: unknown) {
+  if (error instanceof SupabaseProfileOperationError) {
+    return error.supabaseError;
+  }
+
+  return error;
 }
 
 function createStorageObjectId() {
@@ -283,18 +390,21 @@ function createStorageObjectId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function logSupabaseProfileError(
-  operation: string,
-  error: unknown,
-  context: Record<string, unknown>,
-) {
-  console.error(`[feelog] Supabase profile ${operation} failed`, {
-    operation,
+function logSupabaseProfileError(error: SupabaseProfileOperationError) {
+  const context = error.context;
+  const supabaseError = getProfileErrorCause(error);
+
+  console.error(`[feelog] Supabase profile ${error.operation}`, {
+    operation: error.operation,
+    bucket: context.bucket,
+    storagePath: context.storagePath,
+    user_id: context.user_id,
     context,
-    supabaseError: getSupabaseErrorDetails(error),
+    supabaseError: getSupabaseErrorDetails(supabaseError),
     profilesTable: {
       table: "profiles",
       selectedColumns: PROFILE_COLUMNS,
+      textColumns: PROFILE_TEXT_COLUMNS,
       avatarBucket: PROFILE_AVATAR_BUCKET,
       avatarPathPattern: PROFILE_AVATAR_PATH_PATTERN,
     },
@@ -302,7 +412,7 @@ function logSupabaseProfileError(
       "Profile avatars are stored under {user_id}/profile/... so Storage policies can use the same auth.uid() prefix rule as post images.",
     bucketVisibilityNote:
       "The app uses signed URLs and works with a private bucket. createSignedUrl requires Storage select access for the authenticated user.",
-    error,
+    error: supabaseError,
   });
 }
 

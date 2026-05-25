@@ -46,10 +46,12 @@ import { initialPosts } from "@/lib/feelog/seed-data";
 import {
   PROFILE_AVATAR_BUCKET,
   PROFILE_AVATAR_SIGNED_URL_SECONDS,
+  SupabaseProfileOperationError,
   fetchSupabaseProfile,
   removeSupabaseProfileAvatar,
   uploadSupabaseProfileAvatar,
   upsertSupabaseProfile,
+  upsertSupabaseTextProfile,
 } from "@/lib/feelog/supabase-profile-store";
 import {
   createSupabasePost,
@@ -210,7 +212,11 @@ export default function Home() {
 
     profileSaveTimerRef.current = window.setTimeout(() => {
       profileSaveTimerRef.current = null;
-      upsertSupabaseProfile({ supabase, userId: authUser.id, profile })
+      const saveProfile = profile.avatarStoragePath
+        ? upsertSupabaseProfile
+        : upsertSupabaseTextProfile;
+
+      saveProfile({ supabase, userId: authUser.id, profile })
         .then(() => setProfileStatus(""))
         .catch((error: unknown) => {
           setProfileStatus("プロフィールを同期できませんでした");
@@ -690,19 +696,32 @@ export default function Home() {
 
     setProfileStatus("プロフィール画像を準備中");
 
+    let avatarDataUrl: string | undefined;
     let avatarStoragePath: string | undefined;
     let avatarSignedUrl: string | undefined;
+    let storageObjectVerified: boolean | undefined;
     let uploadCompleted = false;
     let signedUrlDisplayVerified: boolean | undefined;
 
     try {
-      const avatarDataUrl = await fileToAvatarDataUrl(file);
+      avatarDataUrl = await fileToAvatarDataUrl(file);
+      const localAvatarProfile = {
+        ...profile,
+        avatarDataUrl,
+        avatarStoragePath: undefined,
+        avatarUrl: undefined,
+        avatarMimeType: undefined,
+        avatarSizeBytes: undefined,
+      };
 
       if (isSupabasePostsMode && authUser) {
         const supabase = getSupabaseBrowserClient();
         if (!supabase) {
           throw new Error("Supabaseの環境変数が未設定です");
         }
+
+        setProfile(localAvatarProfile);
+        saveUserProfile(localAvatarProfile);
 
         const avatar = await uploadSupabaseProfileAvatar({
           supabase,
@@ -712,11 +731,13 @@ export default function Home() {
         });
         avatarStoragePath = avatar.avatarStoragePath;
         avatarSignedUrl = avatar.avatarUrl;
+        storageObjectVerified = avatar.storageObjectVerified;
         uploadCompleted = true;
         signedUrlDisplayVerified = avatar.avatarUrl
           ? await verifyProfileAvatarUrlForDisplay({
               signedUrl: avatar.avatarUrl,
               storagePath: avatar.avatarStoragePath,
+              userId: authUser.id,
             })
           : false;
 
@@ -733,25 +754,46 @@ export default function Home() {
           profile: nextProfile,
         });
         setProfile(nextProfile);
-        setProfileStatus("プロフィール画像を変更しました");
+        saveUserProfile(nextProfile);
+        setProfileStatus(
+          getProfileAvatarSuccessStatus({
+            signedUrlCreated: avatar.signedUrlCreated,
+            signedUrlDisplayVerified,
+            storageObjectVerified,
+          }),
+        );
       } else {
-        setProfile((currentProfile) => ({
-          ...currentProfile,
-          avatarDataUrl,
-          avatarStoragePath: undefined,
-          avatarUrl: undefined,
-          avatarMimeType: undefined,
-          avatarSizeBytes: undefined,
-        }));
+        setProfile(localAvatarProfile);
+        saveUserProfile(localAvatarProfile);
         setProfileStatus("プロフィール画像を変更しました");
       }
     } catch (error) {
+      const localAvatarProfile = avatarDataUrl
+        ? {
+            ...profile,
+            avatarDataUrl,
+            avatarStoragePath: undefined,
+            avatarUrl: undefined,
+            avatarMimeType: undefined,
+            avatarSizeBytes: undefined,
+          }
+        : profile;
+
+      if (avatarDataUrl) {
+        setProfile(localAvatarProfile);
+        saveUserProfile(localAvatarProfile);
+      }
+
       if (isSupabasePostsMode && authUser) {
         const supabase = getSupabaseBrowserClient();
 
         if (supabase) {
           try {
-            await upsertSupabaseProfile({ supabase, userId: authUser.id, profile });
+            await upsertSupabaseTextProfile({
+              supabase,
+              userId: authUser.id,
+              profile: localAvatarProfile,
+            });
           } catch (profileError) {
             setDebugError(
               formatDebugError("save text profile after avatar failure", profileError, authUser.id),
@@ -766,10 +808,12 @@ export default function Home() {
         signedUrl: avatarSignedUrl,
         signedUrlSeconds: PROFILE_AVATAR_SIGNED_URL_SECONDS,
         uploadCompleted,
+        storageObjectVerified,
         signedUrlDisplayVerified,
         supabaseConfigured: isSupabaseConfigured,
         supabasePostsMode: isSupabasePostsMode,
         hasAuthUser: Boolean(authUser),
+        user_id: authUser?.id,
         file: {
           name: file.name,
           type: file.type,
@@ -777,11 +821,7 @@ export default function Home() {
         },
       });
 
-      setProfileStatus(
-        isSupabasePostsMode && authUser
-          ? "プロフィール画像だけ同期できませんでした"
-          : "プロフィール画像を変更できませんでした",
-      );
+      setProfileStatus(getProfileAvatarFailureStatus(error));
       if (authUser) {
         setDebugError(formatDebugError("update profile avatar", error, authUser.id));
       }
@@ -799,6 +839,7 @@ export default function Home() {
         const didRemoveAvatar = await removeSupabaseProfileAvatar({
           supabase,
           storagePath: profile.avatarStoragePath,
+          userId: authUser.id,
           throwOnError: false,
         });
         const nextProfile = {
@@ -1240,9 +1281,11 @@ function DebugErrorNotice({ message }: { message: string }) {
 function verifyProfileAvatarUrlForDisplay({
   signedUrl,
   storagePath,
+  userId,
 }: {
   signedUrl: string;
   storagePath: string;
+  userId: string;
 }) {
   return new Promise<boolean>((resolve) => {
     const image = new window.Image();
@@ -1250,6 +1293,7 @@ function verifyProfileAvatarUrlForDisplay({
     const context = {
       bucket: PROFILE_AVATAR_BUCKET,
       storagePath,
+      user_id: userId,
       signedUrl,
       signedUrlOrigin: getUrlOrigin(signedUrl),
       signedUrlSeconds: PROFILE_AVATAR_SIGNED_URL_SECONDS,
@@ -1296,12 +1340,110 @@ function logProfileAvatarClientError(
   error: unknown,
   context: Record<string, unknown>,
 ) {
+  const cause = getProfileAvatarErrorCause(error);
+
   console.error(`[feelog] ${operation} failed`, {
-    operation,
+    operation: getProfileAvatarOperationLabel(error) || operation,
+    bucket: context.bucket,
+    storagePath: context.storagePath,
+    user_id: context.user_id,
     context,
-    supabaseError: getErrorDetails(error),
-    error,
+    supabaseError: getErrorDetails(cause),
+    error: cause,
   });
+}
+
+function getProfileAvatarSuccessStatus({
+  signedUrlCreated,
+  signedUrlDisplayVerified,
+  storageObjectVerified,
+}: {
+  signedUrlCreated: boolean;
+  signedUrlDisplayVerified: boolean | undefined;
+  storageObjectVerified: boolean | undefined;
+}) {
+  if (!isDevelopment) return "プロフィール画像を変更しました";
+
+  if (storageObjectVerified === false) {
+    return "プロフィール画像を変更しました（Storage download verify failed）";
+  }
+
+  if (!signedUrlCreated) {
+    return "プロフィール画像を変更しました（signed URL failed）";
+  }
+
+  if (signedUrlDisplayVerified === false) {
+    return "プロフィール画像を変更しました（avatar display check failed）";
+  }
+
+  return "プロフィール画像を変更しました";
+}
+
+function getProfileAvatarFailureStatus(error: unknown) {
+  const operation = getProfileAvatarOperationLabel(error);
+  const suffix = isDevelopment && operation ? `（${operation}）` : "";
+
+  return `画像同期を確認してください${suffix}`;
+}
+
+function getProfileAvatarOperationLabel(error: unknown) {
+  const cause = getProfileAvatarErrorCause(error);
+
+  if (isRlsDeniedError(cause)) return "RLS denied";
+
+  if (error instanceof SupabaseProfileOperationError) {
+    return formatProfileOperation(error.operation);
+  }
+
+  if (error instanceof Error && error.message) return error.message;
+
+  return "";
+}
+
+function formatProfileOperation(operation: string) {
+  const labels: Record<string, string> = {
+    "avatar blob failed": "avatar blob failed",
+    "storage upload failed": "Storage upload failed",
+    "storage download verify failed": "Storage download verify failed",
+    "signed URL failed": "signed URL failed",
+    "profiles update failed": "profiles update failed",
+    "profiles text update failed": "profiles text update failed",
+    "fetch profile failed": "fetch profile failed",
+    "storage remove failed": "Storage remove failed",
+  };
+
+  return labels[operation] ?? operation;
+}
+
+function getProfileAvatarErrorCause(error: unknown) {
+  if (error instanceof SupabaseProfileOperationError) {
+    return error.supabaseError;
+  }
+
+  return error;
+}
+
+function isRlsDeniedError(error: unknown) {
+  if (!isErrorRecord(error)) return false;
+
+  const status = getStringOrNumberValue(error.status) || getStringOrNumberValue(error.statusCode);
+  const code = getStringValue(error.code);
+  const message = getStringValue(error.message).toLowerCase();
+  const details = getStringValue(error.details).toLowerCase();
+  const hint = getStringValue(error.hint).toLowerCase();
+  const text = `${message} ${details} ${hint}`;
+
+  return (
+    status === 401 ||
+    status === "401" ||
+    status === 403 ||
+    status === "403" ||
+    code === "42501" ||
+    text.includes("row-level security") ||
+    text.includes("permission denied") ||
+    text.includes("not authorized") ||
+    text.includes("violates row-level security")
+  );
 }
 
 function getUrlOrigin(value: string) {
@@ -1314,21 +1456,37 @@ function getUrlOrigin(value: string) {
 
 function formatDebugError(operation: string, error: unknown, userId?: string, postId?: string) {
   const parts = [`${operation} failed`];
+  const detailError = getProfileAvatarErrorCause(error);
 
-  if (isErrorRecord(error)) {
-    const code = getStringValue(error.code);
-    const message = getStringValue(error.message);
-    const details = getStringValue(error.details);
-    const hint = getStringValue(error.hint);
+  if (error instanceof SupabaseProfileOperationError) {
+    parts.push(`operation=${formatProfileOperation(error.operation)}`);
+    const bucket = getStringValue(error.context.bucket);
+    const storagePath = getStringValue(error.context.storagePath);
+    const contextUserId = getStringValue(error.context.user_id);
+
+    if (bucket) parts.push(`bucket=${bucket}`);
+    if (storagePath) parts.push(`storagePath=${storagePath}`);
+    if (contextUserId) parts.push(`user_id=${contextUserId}`);
+  }
+
+  if (isErrorRecord(detailError)) {
+    const code = getStringValue(detailError.code);
+    const message = getStringValue(detailError.message);
+    const details = getStringValue(detailError.details);
+    const hint = getStringValue(detailError.hint);
+    const status =
+      getStringOrNumberValue(detailError.status) ||
+      getStringOrNumberValue(detailError.statusCode);
 
     if (code) parts.push(`code=${code}`);
     if (message) parts.push(`message=${message}`);
     if (details) parts.push(`details=${details}`);
     if (hint) parts.push(`hint=${hint}`);
-  } else if (error instanceof Error) {
-    parts.push(`message=${error.message}`);
-  } else if (typeof error === "string") {
-    parts.push(`message=${error}`);
+    if (status) parts.push(`status=${status}`);
+  } else if (detailError instanceof Error) {
+    parts.push(`message=${detailError.message}`);
+  } else if (typeof detailError === "string") {
+    parts.push(`message=${detailError}`);
   }
 
   if (userId) parts.push(`authUser.id=${userId}`);
