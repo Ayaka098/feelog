@@ -5,6 +5,10 @@ export type UserProfile = {
   displayName: string;
   userHandle: string;
   avatarDataUrl?: string;
+  avatarStoragePath?: string;
+  avatarUrl?: string;
+  avatarMimeType?: string;
+  avatarSizeBytes?: number;
 };
 
 export const DEFAULT_USER_PROFILE: UserProfile = {
@@ -49,11 +53,29 @@ export function normalizeUserProfile(value: unknown): UserProfile {
     typeof value.avatarDataUrl === "string" && value.avatarDataUrl.startsWith("data:image/")
       ? value.avatarDataUrl
       : undefined;
+  const avatarStoragePath =
+    typeof value.avatarStoragePath === "string" && value.avatarStoragePath
+      ? value.avatarStoragePath
+      : undefined;
+  const avatarUrl =
+    typeof value.avatarUrl === "string" && value.avatarUrl ? value.avatarUrl : undefined;
+  const avatarMimeType =
+    typeof value.avatarMimeType === "string" && value.avatarMimeType
+      ? value.avatarMimeType
+      : undefined;
+  const avatarSizeBytes =
+    typeof value.avatarSizeBytes === "number" && Number.isFinite(value.avatarSizeBytes)
+      ? value.avatarSizeBytes
+      : undefined;
 
   return {
     displayName,
     userHandle,
     avatarDataUrl,
+    avatarStoragePath,
+    avatarUrl,
+    avatarMimeType,
+    avatarSizeBytes,
   };
 }
 
@@ -63,6 +85,10 @@ export function getProfileDisplayName(profile: UserProfile) {
 
 export function getProfileHandle(profile: UserProfile) {
   return normalizeUserHandle(profile.userHandle);
+}
+
+export function getProfileAvatarUrl(profile: UserProfile) {
+  return profile.avatarUrl || profile.avatarDataUrl;
 }
 
 export function normalizeDisplayName(value: string) {

@@ -35,6 +35,7 @@ import {
 } from "@/lib/feelog/post-model";
 import {
   DEFAULT_USER_PROFILE,
+  getProfileAvatarUrl,
   getProfileDisplayName,
   getProfileHandle,
   loadUserProfile,
@@ -42,6 +43,12 @@ import {
   type UserProfile,
 } from "@/lib/feelog/profile-store";
 import { initialPosts } from "@/lib/feelog/seed-data";
+import {
+  fetchSupabaseProfile,
+  removeSupabaseProfileAvatar,
+  uploadSupabaseProfileAvatar,
+  upsertSupabaseProfile,
+} from "@/lib/feelog/supabase-profile-store";
 import {
   createSupabasePost,
   deleteSupabasePost,
@@ -106,6 +113,7 @@ export default function Home() {
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const loadMoreTimerRef = useRef<number | null>(null);
   const panelCloseTimerRef = useRef<number | null>(null);
+  const profileSaveTimerRef = useRef<number | null>(null);
   const isSupabasePostsMode = isSupabaseConfigured && authReady && Boolean(authUser);
 
   useEffect(() => {
@@ -127,9 +135,84 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!profileReady) return;
+    if (!profileReady || isSupabasePostsMode) return;
     saveUserProfile(profile);
-  }, [profile, profileReady]);
+  }, [isSupabasePostsMode, profile, profileReady]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !authReady || !authUser) return;
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+
+    let isActive = true;
+
+    fetchSupabaseProfile({ supabase, userId: authUser.id })
+      .then(async (remoteProfile) => {
+        if (!isActive) return;
+
+        if (remoteProfile) {
+          setProfile(remoteProfile);
+          setProfileReady(true);
+          setProfileStatus("");
+          return;
+        }
+
+        const localProfile = loadUserProfile();
+        setProfile(localProfile);
+        setProfileReady(true);
+
+        try {
+          await upsertSupabaseProfile({
+            supabase,
+            userId: authUser.id,
+            profile: localProfile,
+          });
+          if (isActive) setProfileStatus("");
+        } catch {
+          if (isActive) setProfileStatus("プロフィール同期を確認してください");
+        }
+      })
+      .catch((error: unknown) => {
+        if (!isActive) return;
+        setProfile(loadUserProfile());
+        setProfileReady(true);
+        setProfileStatus("プロフィール同期を確認してください");
+        setDebugError(formatDebugError("fetch profile", error, authUser.id));
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [authReady, authUser]);
+
+  useEffect(() => {
+    if (!profileReady || !isSupabasePostsMode || !authUser) return;
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return;
+
+    if (profileSaveTimerRef.current !== null) {
+      window.clearTimeout(profileSaveTimerRef.current);
+    }
+
+    profileSaveTimerRef.current = window.setTimeout(() => {
+      profileSaveTimerRef.current = null;
+      upsertSupabaseProfile({ supabase, userId: authUser.id, profile })
+        .then(() => setProfileStatus(""))
+        .catch((error: unknown) => {
+          setProfileStatus("プロフィールを同期できませんでした");
+          setDebugError(formatDebugError("save profile", error, authUser.id));
+        });
+    }, 600);
+
+    return () => {
+      if (profileSaveTimerRef.current !== null) {
+        window.clearTimeout(profileSaveTimerRef.current);
+        profileSaveTimerRef.current = null;
+      }
+    };
+  }, [authUser, isSupabasePostsMode, profile, profileReady]);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -155,6 +238,10 @@ export default function Home() {
       setAuthReady(true);
       setIsAuthBusy(false);
       setAuthStatus("");
+      if (!session?.user) {
+        setProfile(loadUserProfile());
+        setProfileReady(true);
+      }
     });
 
     return () => {
@@ -167,6 +254,9 @@ export default function Home() {
     return () => {
       if (panelCloseTimerRef.current !== null) {
         window.clearTimeout(panelCloseTimerRef.current);
+      }
+      if (profileSaveTimerRef.current !== null) {
+        window.clearTimeout(profileSaveTimerRef.current);
       }
     };
   }, []);
@@ -590,22 +680,94 @@ export default function Home() {
 
     try {
       const avatarDataUrl = await fileToAvatarDataUrl(file);
-      setProfile((currentProfile) => ({
-        ...currentProfile,
-        avatarDataUrl,
-      }));
+
+      if (isSupabasePostsMode && authUser) {
+        const supabase = getSupabaseBrowserClient();
+        if (!supabase) {
+          throw new Error("Supabaseの環境変数が未設定です");
+        }
+
+        const avatar = await uploadSupabaseProfileAvatar({
+          supabase,
+          userId: authUser.id,
+          avatarDataUrl,
+          previousStoragePath: profile.avatarStoragePath,
+        });
+        const nextProfile = {
+          ...profile,
+          avatarDataUrl: undefined,
+          ...avatar,
+        };
+
+        await upsertSupabaseProfile({
+          supabase,
+          userId: authUser.id,
+          profile: nextProfile,
+        });
+        setProfile(nextProfile);
+      } else {
+        setProfile((currentProfile) => ({
+          ...currentProfile,
+          avatarDataUrl,
+          avatarStoragePath: undefined,
+          avatarUrl: undefined,
+          avatarMimeType: undefined,
+          avatarSizeBytes: undefined,
+        }));
+      }
       setProfileStatus("プロフィール画像を変更しました");
-    } catch {
+    } catch (error) {
       setProfileStatus("プロフィール画像を読み込めませんでした");
+      if (authUser) {
+        setDebugError(formatDebugError("update profile avatar", error, authUser.id));
+      }
     }
   }
 
-  function clearProfileAvatar() {
-    setProfile((currentProfile) => ({
-      ...currentProfile,
-      avatarDataUrl: undefined,
-    }));
-    setProfileStatus("プロフィール画像を解除しました");
+  async function clearProfileAvatar() {
+    try {
+      if (isSupabasePostsMode && authUser) {
+        const supabase = getSupabaseBrowserClient();
+        if (!supabase) {
+          throw new Error("Supabaseの環境変数が未設定です");
+        }
+
+        await removeSupabaseProfileAvatar({
+          supabase,
+          storagePath: profile.avatarStoragePath,
+        });
+        const nextProfile = {
+          ...profile,
+          avatarDataUrl: undefined,
+          avatarStoragePath: undefined,
+          avatarUrl: undefined,
+          avatarMimeType: undefined,
+          avatarSizeBytes: undefined,
+        };
+
+        await upsertSupabaseProfile({
+          supabase,
+          userId: authUser.id,
+          profile: nextProfile,
+        });
+        setProfile(nextProfile);
+      } else {
+        setProfile((currentProfile) => ({
+          ...currentProfile,
+          avatarDataUrl: undefined,
+          avatarStoragePath: undefined,
+          avatarUrl: undefined,
+          avatarMimeType: undefined,
+          avatarSizeBytes: undefined,
+        }));
+      }
+      setProfileStatus("プロフィール画像を解除しました");
+    } catch (error) {
+      setProfileStatus("プロフィール画像を解除できませんでした");
+      if (authUser) {
+        setDebugError(formatDebugError("clear profile avatar", error, authUser.id));
+      }
+    }
   }
 
   function startEditing(post: Post) {
@@ -734,6 +896,8 @@ export default function Home() {
       setAuthStatus("ログアウトできませんでした");
     } else {
       setAuthUser(null);
+      setProfile(loadUserProfile());
+      setProfileReady(true);
     }
 
     setIsAuthBusy(false);
@@ -1935,6 +2099,7 @@ function ProfilePanel({
   const displayName = getProfileDisplayName(profile);
   const userHandle = getProfileHandle(profile);
   const authEmail = authUser?.email ?? "未ログイン";
+  const avatarUrl = getProfileAvatarUrl(profile);
 
   return (
     <section
@@ -2026,7 +2191,7 @@ function ProfilePanel({
               type="file"
             />
           </label>
-          {profile.avatarDataUrl ? (
+          {avatarUrl ? (
             <button
               className="h-9 rounded-full px-3 text-[13px] font-semibold text-neutral-500 transition-colors hover:bg-neutral-100"
               onClick={onAvatarClear}
@@ -2105,13 +2270,14 @@ function Avatar({ compact = false, profile }: { compact?: boolean; profile: User
   const sizeClass = compact
     ? "h-10 w-10 text-[17px] leading-10"
     : "h-11 w-11 text-[18px] leading-[44px]";
+  const avatarUrl = getProfileAvatarUrl(profile);
 
-  if (profile.avatarDataUrl) {
+  if (avatarUrl) {
     return (
       <div
         aria-hidden="true"
         className={`shrink-0 rounded-full border border-pink-100 bg-cover bg-center ${sizeClass}`}
-        style={{ backgroundImage: `url(${JSON.stringify(profile.avatarDataUrl)})` }}
+        style={{ backgroundImage: `url(${JSON.stringify(avatarUrl)})` }}
       />
     );
   }
