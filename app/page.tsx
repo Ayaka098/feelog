@@ -2099,7 +2099,7 @@ function Composer({
             <span className="shrink-0 text-neutral-500">@{userHandle}</span>
           </div>
           <textarea
-            className="feelog-emotion-font min-h-24 w-full resize-none overflow-hidden bg-transparent pt-1 text-[20px] font-medium leading-7 text-neutral-950 outline-none placeholder:text-[#a99ca3]"
+            className="feelog-emotion-font min-h-24 w-full resize-none overflow-hidden bg-transparent pt-1 text-[20px] font-medium leading-7 text-[#5f5f5f] outline-none placeholder:text-[#a99ca3]"
             onChange={(event) => {
               onBodyChange(event.target.value);
               resizeTextarea(event.currentTarget);
@@ -2226,7 +2226,7 @@ function PostItem({
           {isEditing ? (
             <div className="mt-2">
               <textarea
-                className="feelog-emotion-font min-h-28 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 text-[16px] font-medium leading-6 outline-none focus:border-pink-300 focus:ring-2 focus:ring-pink-100"
+                className="feelog-emotion-font min-h-28 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 text-[16px] font-medium leading-6 text-[#5f5f5f] outline-none focus:border-pink-300 focus:ring-2 focus:ring-pink-100"
                 onChange={(event) => onEditingBodyChange(event.target.value)}
                 value={editingBody}
               />
@@ -2250,7 +2250,7 @@ function PostItem({
             </div>
           ) : (
             <>
-              <p className="feelog-emotion-font mt-1 whitespace-pre-wrap break-words text-[15px] font-medium leading-6 text-neutral-950">
+              <p className="feelog-emotion-font mt-1 whitespace-pre-wrap break-words text-[15px] font-medium leading-6 text-[#5f5f5f]">
                 {post.body}
               </p>
               {post.image ? (
@@ -2539,7 +2539,7 @@ function ToolsPanel({
                   期間：{exportPeriodLabel} · キーワード：{exportKeywordLabel}
                 </p>
                 <textarea
-                  className="feelog-emotion-font mt-3 min-h-44 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 text-[12px] font-medium leading-5 text-neutral-800 outline-none focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
+                  className="feelog-emotion-font mt-3 min-h-44 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 text-[12px] font-medium leading-5 text-[#5f5f5f] outline-none focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
                   readOnly
                   value={exportText}
                 />
