@@ -9,6 +9,7 @@ export type UserProfile = {
   avatarUrl?: string;
   avatarMimeType?: string;
   avatarSizeBytes?: number;
+  updatedAt?: string;
 };
 
 export const DEFAULT_USER_PROFILE: UserProfile = {
@@ -16,22 +17,24 @@ export const DEFAULT_USER_PROFILE: UserProfile = {
   userHandle: "feel",
 };
 
-export function loadUserProfile() {
+export function loadUserProfile({ includeAvatar = true } = {}) {
   try {
     const raw = window.localStorage.getItem(USER_PROFILE_STORAGE_KEY);
     if (!raw) return DEFAULT_USER_PROFILE;
 
-    return normalizeUserProfile(JSON.parse(raw));
+    const profile = normalizeUserProfile(JSON.parse(raw));
+    return includeAvatar ? profile : withoutProfileAvatar(profile);
   } catch {
     return DEFAULT_USER_PROFILE;
   }
 }
 
-export function saveUserProfile(profile: UserProfile) {
+export function saveUserProfile(profile: UserProfile, { includeAvatar = true } = {}) {
   try {
+    const profileToSave = includeAvatar ? profile : withoutProfileAvatar(profile);
     window.localStorage.setItem(
       USER_PROFILE_STORAGE_KEY,
-      JSON.stringify(normalizeUserProfile(profile)),
+      JSON.stringify(normalizeUserProfile(profileToSave)),
     );
   } catch {
     // Profile settings are nice-to-have; the app should keep posting if storage is unavailable.
@@ -67,6 +70,12 @@ export function normalizeUserProfile(value: unknown): UserProfile {
     typeof value.avatarSizeBytes === "number" && Number.isFinite(value.avatarSizeBytes)
       ? value.avatarSizeBytes
       : undefined;
+  const updatedAt =
+    typeof value.updatedAt === "string" && value.updatedAt
+      ? value.updatedAt
+      : typeof value.updated_at === "string" && value.updated_at
+        ? value.updated_at
+        : undefined;
 
   return {
     displayName,
@@ -76,6 +85,15 @@ export function normalizeUserProfile(value: unknown): UserProfile {
     avatarUrl,
     avatarMimeType,
     avatarSizeBytes,
+    updatedAt,
+  };
+}
+
+export function withoutProfileAvatar(profile: UserProfile): UserProfile {
+  return {
+    displayName: getProfileDisplayName(profile),
+    userHandle: getProfileHandle(profile),
+    updatedAt: profile.updatedAt,
   };
 }
 
@@ -88,7 +106,14 @@ export function getProfileHandle(profile: UserProfile) {
 }
 
 export function getProfileAvatarUrl(profile: UserProfile) {
-  return profile.avatarUrl || profile.avatarDataUrl;
+  if (profile.avatarUrl) {
+    if (!profile.updatedAt) return profile.avatarUrl;
+
+    const separator = profile.avatarUrl.includes("?") ? "&" : "?";
+    return `${profile.avatarUrl}${separator}v=${encodeURIComponent(profile.updatedAt)}`;
+  }
+
+  return profile.avatarDataUrl;
 }
 
 export function normalizeDisplayName(value: string) {

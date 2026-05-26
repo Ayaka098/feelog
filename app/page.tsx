@@ -7,6 +7,7 @@ import {
   KeyboardEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -40,6 +41,7 @@ import {
   getProfileHandle,
   loadUserProfile,
   saveUserProfile,
+  withoutProfileAvatar,
   type UserProfile,
 } from "@/lib/feelog/profile-store";
 import { initialPosts } from "@/lib/feelog/seed-data";
@@ -103,6 +105,7 @@ export default function Home() {
   const [toDate, setToDate] = useState("");
   const [exportFromDate, setExportFromDate] = useState("");
   const [exportToDate, setExportToDate] = useState("");
+  const [exportKeyword, setExportKeyword] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingBody, setEditingBody] = useState("");
   const [now, setNow] = useState(HYDRATION_NOW);
@@ -140,6 +143,43 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    let previousScrollRestoration: ScrollRestoration | null = null;
+
+    if ("scrollRestoration" in window.history) {
+      previousScrollRestoration = window.history.scrollRestoration;
+      window.history.scrollRestoration = "manual";
+    }
+
+    const resetInitialScroll = () => {
+      const activeElement = document.activeElement;
+      const isComposerControl =
+        (activeElement instanceof HTMLTextAreaElement ||
+          activeElement instanceof HTMLInputElement) &&
+        activeElement.closest("[data-feelog-composer='true']");
+
+      if (isComposerControl) {
+        activeElement.blur();
+      }
+
+      window.scrollTo({ left: 0, top: 0, behavior: "auto" });
+    };
+
+    resetInitialScroll();
+    const animationFrame = window.requestAnimationFrame(resetInitialScroll);
+    const timer = window.setTimeout(resetInitialScroll, 120);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(timer);
+      if (previousScrollRestoration) {
+        window.history.scrollRestoration = previousScrollRestoration;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isSupabaseConfigured) return undefined;
+
     const timer = window.setTimeout(() => {
       setProfile(loadUserProfile());
       setProfileReady(true);
@@ -154,12 +194,37 @@ export default function Home() {
   }, [isSupabasePostsMode, profile, profileReady]);
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !authReady || !authUser) return;
-
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
+    if (!isSupabaseConfigured || !authReady) return;
 
     let isActive = true;
+
+    if (!authUser) {
+      const timer = window.setTimeout(() => {
+        if (!isActive) return;
+        setProfile(loadUserProfile({ includeAvatar: false }));
+        setProfileReady(true);
+        setProfileStatus("");
+      }, 0);
+
+      return () => {
+        isActive = false;
+        window.clearTimeout(timer);
+      };
+    }
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      const timer = window.setTimeout(() => {
+        if (!isActive) return;
+        setProfile(loadUserProfile({ includeAvatar: false }));
+        setProfileReady(true);
+      }, 0);
+
+      return () => {
+        isActive = false;
+        window.clearTimeout(timer);
+      };
+    }
 
     fetchSupabaseProfile({ supabase, userId: authUser.id })
       .then(async (remoteProfile) => {
@@ -172,7 +237,7 @@ export default function Home() {
           return;
         }
 
-        const localProfile = loadUserProfile();
+        const localProfile = loadUserProfile({ includeAvatar: false });
         setProfile(localProfile);
         setProfileReady(true);
 
@@ -189,7 +254,7 @@ export default function Home() {
       })
       .catch((error: unknown) => {
         if (!isActive) return;
-        setProfile(loadUserProfile());
+        setProfile(loadUserProfile({ includeAvatar: false }));
         setProfileReady(true);
         setProfileStatus("プロフィール同期を確認してください");
         setDebugError(formatDebugError("fetch profile", error, authUser.id));
@@ -245,6 +310,7 @@ export default function Home() {
         setAuthStatus("ログイン状態を取得できませんでした");
       }
 
+      setProfileReady(false);
       setAuthUser(data.session?.user ?? null);
       setAuthReady(true);
     });
@@ -252,13 +318,13 @@ export default function Home() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      setProfileReady(false);
       setAuthUser(session?.user ?? null);
       setAuthReady(true);
       setIsAuthBusy(false);
       setAuthStatus("");
       if (!session?.user) {
-        setProfile(loadUserProfile());
-        setProfileReady(true);
+        setProfile(loadUserProfile({ includeAvatar: false }));
       }
     });
 
@@ -401,6 +467,7 @@ export default function Home() {
       supabase,
       userId: authUser.id,
       range: { from: exportFromDate, to: exportToDate },
+      keyword: exportKeyword,
     })
       .then((nextPosts) => {
         if (!isActive) return;
@@ -415,7 +482,7 @@ export default function Home() {
     return () => {
       isActive = false;
     };
-  }, [authReady, authUser, exportFromDate, exportToDate]);
+  }, [authReady, authUser, exportFromDate, exportKeyword, exportToDate]);
 
   const filteredPosts = useMemo(
     () =>
@@ -429,8 +496,19 @@ export default function Home() {
     () =>
       isSupabasePostsMode
         ? remoteExportPosts
-        : getExportPosts(posts, { from: exportFromDate, to: exportToDate }),
-    [exportFromDate, exportToDate, isSupabasePostsMode, posts, remoteExportPosts],
+        : getExportPosts(
+            posts,
+            { from: exportFromDate, to: exportToDate },
+            exportKeyword,
+          ),
+    [
+      exportFromDate,
+      exportKeyword,
+      exportToDate,
+      isSupabasePostsMode,
+      posts,
+      remoteExportPosts,
+    ],
   );
 
   const exportText = useMemo(() => buildExportText(exportPosts), [exportPosts]);
@@ -596,16 +674,20 @@ export default function Home() {
           setTotalPosts((currentTotal) => currentTotal + 1);
         }
         if (
-          filterPosts([nextPost], "", {
+          filterPosts([nextPost], exportKeyword, {
             from: exportFromDate,
             to: exportToDate,
           }).length > 0
         ) {
           setRemoteExportPosts((currentPosts) =>
-            getExportPosts([...currentPosts, nextPost], {
-              from: exportFromDate,
-              to: exportToDate,
-            }),
+            getExportPosts(
+              [...currentPosts, nextPost],
+              {
+                from: exportFromDate,
+                to: exportToDate,
+              },
+              exportKeyword,
+            ),
           );
         }
         setBody("");
@@ -721,7 +803,7 @@ export default function Home() {
         }
 
         setProfile(localAvatarProfile);
-        saveUserProfile(localAvatarProfile);
+        saveUserProfile(localAvatarProfile, { includeAvatar: false });
 
         const avatar = await uploadSupabaseProfileAvatar({
           supabase,
@@ -741,20 +823,27 @@ export default function Home() {
             })
           : false;
 
-        const nextProfile = {
+        const profileWithUploadedAvatar = {
           ...profile,
           ...avatar,
           avatarDataUrl: signedUrlDisplayVerified ? undefined : avatarDataUrl,
           avatarUrl: signedUrlDisplayVerified ? avatar.avatarUrl : undefined,
         };
 
-        await upsertSupabaseProfile({
+        const savedProfile = await upsertSupabaseProfile({
           supabase,
           userId: authUser.id,
-          profile: nextProfile,
+          profile: profileWithUploadedAvatar,
         });
+        const nextProfile = {
+          ...savedProfile,
+          avatarDataUrl: signedUrlDisplayVerified ? undefined : avatarDataUrl,
+          avatarUrl: signedUrlDisplayVerified
+            ? savedProfile.avatarUrl ?? avatar.avatarUrl
+            : undefined,
+        };
         setProfile(nextProfile);
-        saveUserProfile(nextProfile);
+        saveUserProfile(nextProfile, { includeAvatar: false });
         setProfileStatus(
           getProfileAvatarSuccessStatus({
             signedUrlCreated: avatar.signedUrlCreated,
@@ -781,7 +870,7 @@ export default function Home() {
 
       if (avatarDataUrl) {
         setProfile(localAvatarProfile);
-        saveUserProfile(localAvatarProfile);
+        saveUserProfile(localAvatarProfile, { includeAvatar: !isSupabasePostsMode });
       }
 
       if (isSupabasePostsMode && authUser) {
@@ -831,6 +920,11 @@ export default function Home() {
   async function clearProfileAvatar() {
     if (!window.confirm("プロフィール画像を削除しますか？")) return;
 
+    const previousStoragePath = profile.avatarStoragePath;
+    const nextProfile = withoutProfileAvatar(profile);
+    setProfile(nextProfile);
+    saveUserProfile(nextProfile, { includeAvatar: false });
+
     try {
       if (isSupabasePostsMode && authUser) {
         const supabase = getSupabaseBrowserClient();
@@ -840,39 +934,23 @@ export default function Home() {
 
         const didRemoveAvatar = await removeSupabaseProfileAvatar({
           supabase,
-          storagePath: profile.avatarStoragePath,
+          storagePath: previousStoragePath,
           userId: authUser.id,
           throwOnError: false,
         });
-        const nextProfile = {
-          ...profile,
-          avatarDataUrl: undefined,
-          avatarStoragePath: undefined,
-          avatarUrl: undefined,
-          avatarMimeType: undefined,
-          avatarSizeBytes: undefined,
-        };
 
-        await upsertSupabaseProfile({
+        const savedProfile = await upsertSupabaseProfile({
           supabase,
           userId: authUser.id,
           profile: nextProfile,
         });
-        setProfile(nextProfile);
+        setProfile(withoutProfileAvatar(savedProfile));
         setProfileStatus(
           didRemoveAvatar
             ? "プロフィール画像を削除しました"
             : "プロフィール画像の参照を削除しました",
         );
       } else {
-        setProfile((currentProfile) => ({
-          ...currentProfile,
-          avatarDataUrl: undefined,
-          avatarStoragePath: undefined,
-          avatarUrl: undefined,
-          avatarMimeType: undefined,
-          avatarSizeBytes: undefined,
-        }));
         setProfileStatus("プロフィール画像を削除しました");
       }
     } catch (error) {
@@ -919,9 +997,22 @@ export default function Home() {
         if (!stillMatchesTimeline) {
           setTotalPosts((currentTotal) => Math.max(0, currentTotal - 1));
         }
-        setRemoteExportPosts((currentPosts) =>
-          currentPosts.map((post) => (post.id === postId ? updatedPost : post)),
-        );
+        const stillMatchesExport =
+          filterPosts([updatedPost], exportKeyword, {
+            from: exportFromDate,
+            to: exportToDate,
+          }).length > 0;
+        setRemoteExportPosts((currentPosts) => {
+          const postsWithoutEdited = deletePostById(currentPosts, postId);
+
+          return stillMatchesExport
+            ? getExportPosts(
+                [...postsWithoutEdited, updatedPost],
+                { from: exportFromDate, to: exportToDate },
+                exportKeyword,
+              )
+            : postsWithoutEdited;
+        });
         setEditingId(null);
         setEditingBody("");
       } catch (error) {
@@ -1002,14 +1093,19 @@ export default function Home() {
 
     setIsAuthBusy(true);
     setAuthStatus("");
+    const previousProfile = profile;
+    setProfileReady(false);
+    setProfile(withoutProfileAvatar(profile));
 
     const { error } = await supabase.auth.signOut();
 
     if (error) {
       setAuthStatus("ログアウトできませんでした");
+      setProfile(previousProfile);
+      setProfileReady(true);
     } else {
       setAuthUser(null);
-      setProfile(loadUserProfile());
+      setProfile(loadUserProfile({ includeAvatar: false }));
       setProfileReady(true);
     }
 
@@ -1115,6 +1211,7 @@ export default function Home() {
             onClearImage={clearDraftImage}
             onImageFileChange={handleImageFileChange}
             onSubmit={handleSubmit}
+            isProfileReady={profileReady}
             profile={profile}
             status={imageStatus}
           />
@@ -1128,6 +1225,7 @@ export default function Home() {
                 copyState={copyState}
                 displayTool={renderedPanelTool}
                 exportFromDate={exportFromDate}
+                exportKeyword={exportKeyword}
                 exportText={exportText}
                 exportToDate={exportToDate}
                 fromDate={fromDate}
@@ -1144,10 +1242,12 @@ export default function Home() {
                 onSignOut={signOut}
                 onToolChange={handleToolChange}
                 profile={profile}
+                isProfileReady={profileReady}
                 profileStatus={profileStatus}
                 query={query}
                 resultCount={displayedTotal}
                 setExportFromDate={setExportFromDate}
+                setExportKeyword={setExportKeyword}
                 setExportToDate={setExportToDate}
                 setFromDate={handleFromDateChange}
                 setQuery={handleQueryChange}
@@ -1177,10 +1277,11 @@ export default function Home() {
                     onSaveEdit={() => saveEditing(post.id)}
                     post={post}
                     profile={profile}
+                    isProfileReady={profileReady}
                   />
                 ))}
                 <div
-                  className="border-b border-neutral-200 px-6 py-6 text-center text-[14px] text-neutral-500"
+                  className="feelog-emotion-font border-b border-neutral-200 px-6 py-6 text-center text-[14px] text-neutral-500"
                   ref={loadMoreRef}
                 >
                   {hasMorePosts ? (
@@ -1195,14 +1296,14 @@ export default function Home() {
               </>
             ) : (
               <div className="px-6 py-14 text-center">
-                <p className="text-[15px] font-semibold text-neutral-900">
+                <p className="feelog-emotion-font text-[15px] font-semibold text-neutral-900">
                   {isFetchingPosts
                     ? "読み込み中"
                     : isSupabaseConfigured && !authUser
                       ? "ログインしてください"
                       : timelineStatus || "見つかりませんでした"}
                 </p>
-                <p className="mt-1 text-[14px] text-neutral-500">
+                <p className="feelog-emotion-font mt-1 text-[14px] font-medium text-neutral-500">
                   {isFetchingPosts
                     ? "投稿を取得しています。"
                     : isSupabaseConfigured && !authUser
@@ -1226,6 +1327,7 @@ export default function Home() {
                 copyState={copyState}
                 displayTool={renderedPanelTool}
                 exportFromDate={exportFromDate}
+                exportKeyword={exportKeyword}
                 exportText={exportText}
                 exportToDate={exportToDate}
                 fromDate={fromDate}
@@ -1242,10 +1344,12 @@ export default function Home() {
                 onSignOut={signOut}
                 onToolChange={handleToolChange}
                 profile={profile}
+                isProfileReady={profileReady}
                 profileStatus={profileStatus}
                 query={query}
                 resultCount={displayedTotal}
                 setExportFromDate={setExportFromDate}
+                setExportKeyword={setExportKeyword}
                 setExportToDate={setExportToDate}
                 setFromDate={handleFromDateChange}
                 setQuery={handleQueryChange}
@@ -1940,6 +2044,7 @@ function Composer({
   body,
   draftImage,
   isPostDisabled,
+  isProfileReady,
   onBodyChange,
   onClearImage,
   onImageFileChange,
@@ -1950,6 +2055,7 @@ function Composer({
   body: string;
   draftImage: DraftImage;
   isPostDisabled: boolean;
+  isProfileReady: boolean;
   onBodyChange: (value: string) => void;
   onClearImage: () => void;
   onImageFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -1957,8 +2063,19 @@ function Composer({
   profile: UserProfile;
   status: string;
 }) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const displayName = getProfileDisplayName(profile);
   const userHandle = getProfileHandle(profile);
+
+  const resizeTextarea = useCallback((textarea: HTMLTextAreaElement) => {
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!textareaRef.current) return;
+    resizeTextarea(textareaRef.current);
+  }, [body, resizeTextarea]);
 
   function handleTextareaKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter") return;
@@ -1971,20 +2088,26 @@ function Composer({
   return (
     <form
       className="sticky top-[52px] z-20 border-b border-neutral-200 bg-white/95 px-4 pt-3 backdrop-blur-md"
+      data-feelog-composer="true"
       onSubmit={onSubmit}
     >
       <div className="flex gap-3">
-        <Avatar profile={profile} />
+        <Avatar isReady={isProfileReady} profile={profile} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1 text-[14px] leading-5">
             <span className="truncate font-bold text-neutral-950">{displayName}</span>
             <span className="shrink-0 text-neutral-500">@{userHandle}</span>
           </div>
           <textarea
-            className="min-h-24 w-full resize-none bg-transparent pt-1 text-[20px] leading-7 text-neutral-950 outline-none placeholder:text-[#a99ca3]"
-            onChange={(event) => onBodyChange(event.target.value)}
+            className="feelog-emotion-font min-h-24 w-full resize-none overflow-hidden bg-transparent pt-1 text-[20px] font-medium leading-7 text-neutral-950 outline-none placeholder:text-[#a99ca3]"
+            onChange={(event) => {
+              onBodyChange(event.target.value);
+              resizeTextarea(event.currentTarget);
+            }}
             onKeyDown={handleTextareaKeyDown}
             placeholder="テキストを入力"
+            ref={textareaRef}
+            rows={3}
             value={body}
           />
 
@@ -2020,7 +2143,7 @@ function Composer({
                 </button>
               ) : null}
               {status ? (
-                <span className="truncate text-[12px] font-medium text-neutral-500">
+                <span className="feelog-emotion-font truncate text-[12px] font-medium text-neutral-500">
                   {status}
                 </span>
               ) : null}
@@ -2043,6 +2166,7 @@ function PostItem({
   editingBody,
   editingId,
   hearts,
+  isProfileReady,
   onCancelEdit,
   onDelete,
   onEdit,
@@ -2054,6 +2178,7 @@ function PostItem({
   editingBody: string;
   editingId: string | null;
   hearts: number;
+  isProfileReady: boolean;
   onCancelEdit: () => void;
   onDelete: () => void;
   onEdit: () => void;
@@ -2069,7 +2194,7 @@ function PostItem({
   return (
     <article className="border-b border-neutral-200 px-4 py-3 transition-colors hover:bg-neutral-50/70">
       <div className="flex gap-3">
-        <Avatar compact profile={profile} />
+        <Avatar compact isReady={isProfileReady} profile={profile} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 text-[15px] leading-5">
@@ -2101,7 +2226,7 @@ function PostItem({
           {isEditing ? (
             <div className="mt-2">
               <textarea
-                className="min-h-28 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 text-[16px] leading-6 outline-none focus:border-pink-300 focus:ring-2 focus:ring-pink-100"
+                className="feelog-emotion-font min-h-28 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 text-[16px] font-medium leading-6 outline-none focus:border-pink-300 focus:ring-2 focus:ring-pink-100"
                 onChange={(event) => onEditingBodyChange(event.target.value)}
                 value={editingBody}
               />
@@ -2125,7 +2250,7 @@ function PostItem({
             </div>
           ) : (
             <>
-              <p className="mt-1 whitespace-pre-wrap break-words text-[15px] leading-6 text-neutral-950">
+              <p className="feelog-emotion-font mt-1 whitespace-pre-wrap break-words text-[15px] font-medium leading-6 text-neutral-950">
                 {post.body}
               </p>
               {post.image ? (
@@ -2157,6 +2282,7 @@ function ToolsPanel({
   copyState,
   displayTool,
   exportFromDate,
+  exportKeyword,
   exportText,
   exportToDate,
   fromDate,
@@ -2164,6 +2290,7 @@ function ToolsPanel({
   idPrefix,
   isAuthBusy,
   isPanelClosing,
+  isProfileReady,
   onClearTimelineFilters,
   onCopy,
   onProfileAvatarChange,
@@ -2177,6 +2304,7 @@ function ToolsPanel({
   query,
   resultCount,
   setExportFromDate,
+  setExportKeyword,
   setExportToDate,
   setFromDate,
   setQuery,
@@ -2189,6 +2317,7 @@ function ToolsPanel({
   copyState: "idle" | "copied" | "failed";
   displayTool: ToolTab;
   exportFromDate: string;
+  exportKeyword: string;
   exportText: string;
   exportToDate: string;
   fromDate: string;
@@ -2196,6 +2325,7 @@ function ToolsPanel({
   idPrefix: string;
   isAuthBusy: boolean;
   isPanelClosing: boolean;
+  isProfileReady: boolean;
   onClearTimelineFilters: () => void;
   onCopy: () => void;
   onProfileAvatarChange: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -2209,6 +2339,7 @@ function ToolsPanel({
   query: string;
   resultCount: number;
   setExportFromDate: (value: string) => void;
+  setExportKeyword: (value: string) => void;
   setExportToDate: (value: string) => void;
   setFromDate: (value: string) => void;
   setQuery: (value: string) => void;
@@ -2221,6 +2352,12 @@ function ToolsPanel({
       : copyState === "failed"
         ? "失敗"
         : "コピー";
+  const trimmedExportKeyword = exportKeyword.trim();
+  const exportPeriodLabel =
+    exportFromDate || exportToDate
+      ? `${exportFromDate || "未指定"}〜${exportToDate || "未指定"}`
+      : "すべて";
+  const exportKeywordLabel = trimmedExportKeyword || "なし";
   const tabs: { id: ToolTab; label: string }[] = [
     { id: "search", label: "検索" },
     { id: "export", label: "出力" },
@@ -2282,6 +2419,7 @@ function ToolsPanel({
               idPrefix={idPrefix}
               isAuthBusy={isAuthBusy}
               key={`${idPrefix}-settings-panel`}
+              isProfileReady={isProfileReady}
               onAvatarChange={onProfileAvatarChange}
               onAvatarClear={onProfileAvatarClear}
               onDisplayNameChange={onProfileDisplayNameChange}
@@ -2310,7 +2448,7 @@ function ToolsPanel({
                   キーワード
                 </label>
                 <input
-                  className="h-11 w-full rounded-full border border-neutral-200 bg-neutral-100 px-4 text-[15px] text-neutral-950 outline-none transition-[background-color,border-color,box-shadow] duration-150 placeholder:text-neutral-500 focus:border-pink-200 focus:bg-white focus:ring-2 focus:ring-pink-100"
+                  className="feelog-emotion-font h-11 w-full rounded-full border border-neutral-200 bg-neutral-100 px-4 text-[15px] font-medium text-neutral-950 outline-none transition-[background-color,border-color,box-shadow] duration-150 placeholder:text-neutral-500 focus:border-pink-200 focus:bg-white focus:ring-2 focus:ring-pink-100"
                   id={`${idPrefix}-keyword`}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="検索"
@@ -2332,7 +2470,7 @@ function ToolsPanel({
                   />
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-[13px] font-medium text-neutral-500">
+                  <p className="feelog-emotion-font text-[13px] font-medium text-neutral-500">
                     {hasTimelineFilters ? "絞り込み中" : "すべて表示"} · {resultCount}件
                   </p>
                   <button
@@ -2386,8 +2524,22 @@ function ToolsPanel({
                     value={exportToDate}
                   />
                 </div>
+                <label className="sr-only" htmlFor={`${idPrefix}-export-keyword`}>
+                  含めるキーワード
+                </label>
+                <input
+                  className="feelog-emotion-font mt-2 h-11 w-full rounded-full border border-neutral-200 bg-white px-4 text-[15px] font-medium text-neutral-950 outline-none transition-[background-color,border-color,box-shadow] duration-150 placeholder:text-neutral-500 focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
+                  id={`${idPrefix}-export-keyword`}
+                  onChange={(event) => setExportKeyword(event.target.value)}
+                  placeholder="含めるキーワード（任意）"
+                  type="search"
+                  value={exportKeyword}
+                />
+                <p className="feelog-emotion-font mt-3 text-[12px] font-medium leading-5 text-neutral-500">
+                  期間：{exportPeriodLabel} · キーワード：{exportKeywordLabel}
+                </p>
                 <textarea
-                  className="mt-3 min-h-44 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 font-mono text-[12px] leading-5 text-neutral-800 outline-none focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
+                  className="feelog-emotion-font mt-3 min-h-44 w-full resize-y rounded-2xl border border-neutral-200 bg-white p-3 text-[12px] font-medium leading-5 text-neutral-800 outline-none focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
                   readOnly
                   value={exportText}
                 />
@@ -2406,6 +2558,7 @@ function ProfilePanel({
   className = "mt-4",
   idPrefix,
   isAuthBusy,
+  isProfileReady,
   onAvatarChange,
   onAvatarClear,
   onDisplayNameChange,
@@ -2419,6 +2572,7 @@ function ProfilePanel({
   className?: string;
   idPrefix: string;
   isAuthBusy: boolean;
+  isProfileReady: boolean;
   onAvatarChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onAvatarClear: () => void;
   onDisplayNameChange: (value: string) => void;
@@ -2430,7 +2584,7 @@ function ProfilePanel({
   const displayName = getProfileDisplayName(profile);
   const userHandle = getProfileHandle(profile);
   const authEmail = authUser?.email ?? "未ログイン";
-  const avatarUrl = getProfileAvatarUrl(profile);
+  const avatarUrl = isProfileReady ? getProfileAvatarUrl(profile) : undefined;
 
   return (
     <section
@@ -2446,9 +2600,9 @@ function ProfilePanel({
       </h2>
       <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
         <div className="flex items-center gap-3">
-          <Avatar profile={profile} />
+          <Avatar isReady={isProfileReady} profile={profile} />
           <div className="min-w-0">
-            <p className="truncate text-[15px] font-bold leading-5 text-neutral-950">
+            <p className="feelog-emotion-font truncate text-[15px] font-bold leading-5 text-neutral-950">
               {displayName}
             </p>
             <p className="truncate text-[13px] leading-5 text-neutral-500">
@@ -2459,11 +2613,11 @@ function ProfilePanel({
 
         <div className="mt-4 space-y-3">
           <label className="block" htmlFor={`${idPrefix}-display-name`}>
-            <span className="mb-1 block text-[12px] font-semibold text-neutral-500">
+            <span className="feelog-emotion-font mb-1 block text-[12px] font-semibold text-neutral-500">
               表示名
             </span>
             <input
-              className="h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-[14px] outline-none transition focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
+              className="feelog-emotion-font h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-[14px] font-medium outline-none transition focus:border-pink-200 focus:ring-2 focus:ring-pink-100"
               id={`${idPrefix}-display-name`}
               onChange={(event) => onDisplayNameChange(event.target.value)}
               value={profile.displayName}
@@ -2471,7 +2625,7 @@ function ProfilePanel({
           </label>
 
           <label className="block" htmlFor={`${idPrefix}-user-handle`}>
-            <span className="mb-1 block text-[12px] font-semibold text-neutral-500">
+            <span className="feelog-emotion-font mb-1 block text-[12px] font-semibold text-neutral-500">
               ユーザーID
             </span>
             <div className="flex h-10 items-center overflow-hidden rounded-xl border border-neutral-200 bg-white focus-within:border-pink-200 focus-within:ring-2 focus-within:ring-pink-100">
@@ -2487,7 +2641,9 @@ function ProfilePanel({
         </div>
 
         <div className="mt-4 rounded-xl border border-neutral-200 bg-white px-3 py-3">
-          <p className="text-[12px] font-semibold text-neutral-500">ログイン中</p>
+          <p className="feelog-emotion-font text-[12px] font-semibold text-neutral-500">
+            ログイン中
+          </p>
           <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
             <p className="min-w-0 truncate text-[13px] font-medium text-neutral-700">
               {authEmail}
@@ -2505,7 +2661,9 @@ function ProfilePanel({
             ) : null}
           </div>
           {authStatus ? (
-            <p className="mt-2 text-[12px] font-medium text-neutral-500">{authStatus}</p>
+            <p className="feelog-emotion-font mt-2 text-[12px] font-medium text-neutral-500">
+              {authStatus}
+            </p>
           ) : null}
         </div>
 
@@ -2531,7 +2689,9 @@ function ProfilePanel({
             </button>
           ) : null}
           {status ? (
-            <span className="text-[12px] font-medium text-neutral-500">{status}</span>
+            <span className="feelog-emotion-font text-[12px] font-medium text-neutral-500">
+              {status}
+            </span>
           ) : null}
         </div>
       </div>
@@ -2552,7 +2712,7 @@ function DateField({
 }) {
   return (
     <label className="block min-w-0" htmlFor={id}>
-      <span className="mb-1 block text-[12px] font-semibold text-neutral-500">
+      <span className="feelog-emotion-font mb-1 block text-[12px] font-semibold text-neutral-500">
         {label}
       </span>
       <input
@@ -2596,12 +2756,29 @@ function PostImagePreview({ image }: { image: PostImage }) {
   );
 }
 
-function Avatar({ compact = false, profile }: { compact?: boolean; profile: UserProfile }) {
+function Avatar({
+  compact = false,
+  isReady = true,
+  profile,
+}: {
+  compact?: boolean;
+  isReady?: boolean;
+  profile: UserProfile;
+}) {
   const sizeClass = compact
     ? "h-10 w-10 text-[17px] leading-10"
     : "h-11 w-11 text-[18px] leading-[44px]";
-  const avatarUrl = getProfileAvatarUrl(profile);
+  const avatarUrl = isReady ? getProfileAvatarUrl(profile) : undefined;
   const [failedAvatarUrl, setFailedAvatarUrl] = useState("");
+
+  if (!isReady) {
+    return (
+      <div
+        aria-hidden="true"
+        className={`shrink-0 animate-pulse rounded-full border border-neutral-200 bg-neutral-100 ${sizeClass}`}
+      />
+    );
+  }
 
   if (avatarUrl && failedAvatarUrl !== avatarUrl) {
     const isRemoteAvatarUrl = avatarUrl.startsWith("http");

@@ -270,6 +270,7 @@ function textRowToProfile(row: SupabaseProfileTextRow) {
   return {
     displayName: row.display_name ?? DEFAULT_USER_PROFILE.displayName,
     userHandle: row.user_handle ?? DEFAULT_USER_PROFILE.userHandle,
+    updatedAt: row.updated_at,
   } satisfies UserProfile;
 }
 
@@ -294,6 +295,7 @@ async function rowToProfile(supabase: SupabaseClient, row: SupabaseProfileRow) {
     avatarSizeBytes: Number.isFinite(avatarSizeBytes) && avatarSizeBytes > 0
       ? avatarSizeBytes
       : undefined,
+    updatedAt: row.updated_at,
   } satisfies UserProfile;
 }
 

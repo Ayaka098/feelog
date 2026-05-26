@@ -68,9 +68,17 @@ export function filterPosts(posts: Post[], query: string, range: DateRange) {
   });
 }
 
-export function getExportPosts(posts: Post[], range: DateRange) {
+export function getExportPosts(posts: Post[], range: DateRange, keyword = "") {
+  const normalizedKeyword = keyword.trim().toLocaleLowerCase();
+
   return posts
-    .filter((post) => isWithinDateRange(post, range))
+    .filter((post) => {
+      const matchesKeyword =
+        normalizedKeyword.length === 0 ||
+        post.body.toLocaleLowerCase().includes(normalizedKeyword);
+
+      return matchesKeyword && isWithinDateRange(post, range);
+    })
     .sort(
       (a, b) =>
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),

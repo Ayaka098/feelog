@@ -124,10 +124,12 @@ export async function fetchSupabasePostsForExport({
   supabase,
   userId,
   range,
+  keyword,
 }: {
   supabase: SupabaseClient;
   userId: string;
   range: DateRange;
+  keyword: string;
 }) {
   let request = supabase
     .from("posts")
@@ -142,6 +144,10 @@ export async function fetchSupabasePostsForExport({
     request = request.lt("created_at", toNextDayIso(range.to));
   }
 
+  if (keyword.trim()) {
+    request = request.ilike("body", `%${escapeIlikePattern(keyword.trim())}%`);
+  }
+
   const { data, error } = await request
     .order("created_at", { ascending: true })
     .limit(MAX_EXPORT_ROWS);
@@ -150,6 +156,7 @@ export async function fetchSupabasePostsForExport({
     logSupabasePostError("fetch posts for export", error, {
       userId,
       range,
+      keyword,
       limit: MAX_EXPORT_ROWS,
     });
     throw error;
